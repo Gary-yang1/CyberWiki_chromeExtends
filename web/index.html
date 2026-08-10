@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="CyberWikiBench 网络安全知识模型评测台" />
+    <title>CyberWikiBench</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="CyberWikiBench 首页">
+          <span class="brand-mark" aria-hidden="true">CW</span>
+          <span>
+            <strong>CyberWikiBench</strong>
+            <small>Network Security Model Lab</small>
+          </span>
+        </a>
+        <div class="service-state" id="serviceState">
+          <span class="status-dot"></span>
+          <span>正在连接题库</span>
+        </div>
+      </header>
+
+      <main>
+        <section id="setupView" class="view">
+          <div class="hero">
+            <p class="eyebrow">LOCAL BENCHMARK CONSOLE</p>
+            <h1>用一套可信题库，<br />同时测试准确率与速度。</h1>
+            <p class="hero-copy">
+              按题型、来源和数量抽题。界面适合人工验证，API 与 CLI 用于自动评测本地或外部大模型。
+            </p>
+          </div>
+
+          <div class="dashboard-grid">
+            <form id="testConfigForm" class="panel config-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="panel-kicker">NEW RUN</p>
+                  <h2>创建测试</h2>
+                </div>
+                <span class="step-badge">01</span>
+              </div>
+
+              <fieldset>
+                <legend>题型</legend>
+                <div class="choice-grid">
+                  <label class="type-choice">
+                    <input id="typeSingle" type="checkbox" value="single_choice" checked />
+                    <span class="type-icon">A</span>
+                    <span><strong>单选题</strong><small id="singleCount">—</small></span>
+                  </label>
+                  <label class="type-choice">
+                    <input id="typeTrueFalse" type="checkbox" value="true_false" checked />
+                    <span class="type-icon">✓</span>
+                    <span><strong>判断题</strong><small id="trueFalseCount">—</small></span>
+                  </label>
+                </div>
+              </fieldset>
+
+              <div class="field-row">
+                <label class="field">
+                  <span>题目数量</span>
+                  <input id="questionCount" type="number" min="1" max="931" value="20" required />
+                </label>
+                <label class="field">
+                  <span>随机种子 <em>可选</em></span>
+                  <input id="seed" type="number" placeholder="自动生成" />
+                </label>
+              </div>
+
+              <label class="field">
+                <span>题目来源</span>
+                <select id="sourceSelect">
+                  <option value="">全部来源</option>
+                </select>
+              </label>
+
+              <button class="primary-button" type="submit">
+                <span>开始测试</span>
+                <span aria-hidden="true">→</span>
+              </button>
+              <p class="form-note">测试集生成后保持固定；答案仅在提交后返回。</p>
+            </form>
+
+            <aside class="panel overview-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="panel-kicker">QUESTION BANK</p>
+                  <h2>题库概览</h2>
+                </div>
+                <span class="step-badge muted">LIVE</span>
+              </div>
+              <div class="metric-primary">
+                <strong id="totalQuestions">—</strong>
+                <span>可用题目</span>
+              </div>
+              <div class="metric-list">
+                <div><span>单选题占比</span><strong id="singleRatio">—</strong></div>
+                <div><span>判断题占比</span><strong id="trueFalseRatio">—</strong></div>
+                <div><span>题库来源</span><strong id="sourceCount">—</strong></div>
+              </div>
+              <div class="api-callout">
+                <span class="api-tag">API</span>
+                <div>
+                  <strong>同一评测协议</strong>
+                  <p>GUI、CLI 与 Chrome 插件共享抽题和评分接口。</p>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="testView" class="view hidden">
+          <div class="run-header">
+            <div>
+              <p class="eyebrow">ACTIVE RUN</p>
+              <h1>完成当前测试</h1>
+              <p class="run-id" id="runId"></p>
+            </div>
+            <div class="run-status">
+              <div><span>进度</span><strong id="progressText">0 / 0</strong></div>
+              <div><span>用时</span><strong id="timer">00:00</strong></div>
+            </div>
+          </div>
+          <div class="progress-track"><span id="progressBar"></span></div>
+          <form id="answerForm">
+            <div id="questionList" class="question-list"></div>
+            <div class="submit-bar">
+              <div>
+                <strong id="submitProgress">尚未作答</strong>
+                <span>未作答题目会按错误计分</span>
+              </div>
+              <button class="primary-button compact" type="submit">
+                <span>提交并评分</span><span aria-hidden="true">→</span>
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section id="resultView" class="view hidden">
+          <div class="result-hero">
+            <div>
+              <p class="eyebrow">RUN COMPLETE</p>
+              <h1>评分完成</h1>
+              <p id="resultId" class="run-id"></p>
+            </div>
+            <button id="newRunButton" class="secondary-button" type="button">创建新测试</button>
+          </div>
+          <div id="scoreCards" class="score-grid"></div>
+          <section class="panel result-panel">
+            <div class="panel-heading">
+              <div><p class="panel-kicker">ERROR ANALYSIS</p><h2>逐题结果</h2></div>
+              <div class="result-filter" role="group" aria-label="结果筛选">
+                <button class="filter-button active" type="button" data-filter="all">全部</button>
+                <button class="filter-button" type="button" data-filter="wrong">仅错题</button>
+              </div>
+            </div>
+            <div id="resultList" class="result-list"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

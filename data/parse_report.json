@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0.0",
+  "source_file": "题库汇总.txt",
+  "source_sha256": "091093503342abe3d89de5486f3c53337ac4deb0c2191f7485122e91fd4cce2e",
+  "question_count": 931,
+  "type_counts": {
+    "single_choice": 776,
+    "true_false": 155
+  },
+  "answer_counts": {
+    "A": 193,
+    "B": 185,
+    "C": 216,
+    "D": 182,
+    "false": 71,
+    "true": 84
+  },
+  "source_counts": {
+    "网管四级练习题（一）": 180,
+    "网管四级练习题（三）": 180,
+    "网管四级练习题（二）": 180,
+    "网管四级练习题（五）": 211,
+    "网管四级练习题（四）": 180
+  },
+  "validation": {
+    "valid_questions": 931,
+    "invalid_questions": 0
+  }
+}

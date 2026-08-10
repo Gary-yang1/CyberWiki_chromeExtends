@@ -1,0 +1,15 @@
+# Local benchmark runtime data
+data/benchmark_runs.sqlite3
+runs/
+
+# Secrets and local configuration
+.env
+.env.*
+*.pem
+*.key
+
+# Language/tool caches
+__pycache__/
+*.py[cod]
+node_modules/
+.DS_Store

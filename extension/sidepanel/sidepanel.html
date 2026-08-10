@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>CyberWikiBench Assistant</title>
+    <link rel="stylesheet" href="./sidepanel.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">CW</span>
+          <span>
+            <strong>CyberWikiBench</strong>
+            <small>安全题目助手</small>
+          </span>
+        </div>
+        <span id="connectionState" class="connection-state" title="正在读取模型配置">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span class="connection-label">准备中</span>
+        </span>
+      </header>
+
+      <nav class="tab-list" aria-label="插件功能">
+        <button class="tab-button is-active" type="button" data-tab="assistant" aria-controls="assistantPanel" aria-selected="true">答题助手</button>
+        <button class="tab-button" type="button" data-tab="benchmark" aria-controls="benchmarkPanel" aria-selected="false">Benchmark</button>
+        <button class="tab-button" type="button" data-tab="settings" aria-controls="settingsPanel" aria-selected="false">设置</button>
+      </nav>
+
+      <section id="assistantPanel" class="tab-panel" data-panel="assistant">
+        <div class="panel-intro">
+          <p class="eyebrow">CURRENT PAGE</p>
+          <h1>从当前页面提取并解答题目</h1>
+          <p>默认只给出建议，不会自动提交网页答案。</p>
+        </div>
+
+        <label class="field">
+          <span>解题模型</span>
+          <select id="assistantProfileSelect" aria-label="选择解题模型"></select>
+        </label>
+
+        <div class="button-row">
+          <button id="extractButton" class="button button-secondary" type="button">
+            <span aria-hidden="true">⌁</span>
+            提取当前题目
+          </button>
+          <button id="solveButton" class="button button-primary" type="button">
+            <span aria-hidden="true">✦</span>
+            快速解答
+          </button>
+        </div>
+
+        <label id="questionPickerField" class="field compact-field" hidden>
+          <span id="questionPickerLabel">已识别题目</span>
+          <select id="questionSelect" aria-label="选择当前要解答的题目" disabled></select>
+        </label>
+
+        <article class="card extraction-card" aria-live="polite">
+          <div class="card-heading">
+            <span>已识别题目</span>
+            <button id="copyQuestionButton" class="text-button" type="button" disabled>复制</button>
+          </div>
+          <div id="questionPreview" class="question-preview empty-state">
+            <span class="empty-icon" aria-hidden="true">⌁</span>
+            <p>点击“提取当前题目”，或先在网页中打开一道单选/判断题。</p>
+          </div>
+        </article>
+
+        <article id="solveResultCard" class="card answer-card is-empty" aria-live="polite">
+          <div class="card-heading">
+            <span>建议答案</span>
+            <div class="card-heading-actions">
+              <button id="fillAnswerButton" class="text-button fill-answer-button" type="button" disabled>填入答案</button>
+              <span id="answerRoute" class="route-badge">等待作答</span>
+            </div>
+          </div>
+          <div id="solveResult" class="answer-result empty-state">
+            <span class="empty-icon" aria-hidden="true">✦</span>
+            <p>答案、置信度、模型路径和引用依据会显示在这里。</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="benchmarkPanel" class="tab-panel is-hidden" data-panel="benchmark" hidden>
+        <div class="panel-intro">
+          <p class="eyebrow">MODEL EVALUATION</p>
+          <h1>直接运行一轮模型测评</h1>
+          <p>测试题答案不会发送给模型或暴露在抽题响应中。</p>
+        </div>
+
+        <form id="benchmarkForm" class="stack-form">
+          <label class="field">
+            <span>测试模型</span>
+            <select id="benchmarkProfileSelect" aria-label="选择测试模型"></select>
+          </label>
+
+          <fieldset class="field-set">
+            <legend>题型</legend>
+            <div class="type-grid">
+              <label class="check-card">
+                <input id="benchmarkSingleChoice" type="checkbox" value="single_choice" checked />
+                <span><strong>单选题</strong><small>A / B / C / D</small></span>
+              </label>
+              <label class="check-card">
+                <input id="benchmarkTrueFalse" type="checkbox" value="true_false" checked />
+                <span><strong>判断题</strong><small>正确 / 错误</small></span>
+              </label>
+            </div>
+          </fieldset>
+
+          <div class="two-column">
+            <label class="field">
+              <span>题目数量</span>
+              <input id="benchmarkCount" type="number" min="1" max="200" value="20" required />
+            </label>
+            <label class="field">
+              <span>随机种子 <em>可选</em></span>
+              <input id="benchmarkSeed" type="number" inputmode="numeric" placeholder="自动生成" />
+            </label>
+          </div>
+
+          <label class="field compact-field">
+            <span>运行标签 <em>可选</em></span>
+            <input id="benchmarkLabel" type="text" maxlength="80" placeholder="例如 Claude 验证 - v1" />
+          </label>
+          <label class="inline-toggle benchmark-rag-toggle">
+            <input id="benchmarkUseRag" type="checkbox" />
+            <span>本轮使用本地 RAG 资料检索</span>
+          </label>
+
+          <button id="benchmarkRunButton" class="button button-primary button-wide" type="submit">
+            <span aria-hidden="true">▶</span>
+            开始自动测试
+          </button>
+        </form>
+
+        <article id="benchmarkProgressCard" class="card progress-card is-hidden" aria-live="polite" hidden>
+          <div class="card-heading">
+            <span id="benchmarkProgressTitle">正在准备测试</span>
+            <span id="benchmarkProgressText" class="muted">0 / 0</span>
+          </div>
+          <div class="progress-track"><span id="benchmarkProgressBar"></span></div>
+          <p id="benchmarkProgressNote" class="caption">正在创建固定测试集…</p>
+        </article>
+
+        <article id="benchmarkResultCard" class="card benchmark-result-card is-empty" aria-live="polite">
+          <div class="card-heading">
+            <span>本轮结果</span>
+            <button id="copyBenchmarkButton" class="text-button" type="button" disabled>复制 JSON</button>
+          </div>
+          <div id="benchmarkResult" class="empty-state">
+            <span class="empty-icon" aria-hidden="true">▦</span>
+            <p>完成后会显示准确率、题目数量、延迟和错题摘要。</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="settingsPanel" class="tab-panel is-hidden" data-panel="settings" hidden>
+        <div class="panel-intro">
+          <p class="eyebrow">ROUTING</p>
+          <h1>答题路径与本地服务</h1>
+          <p>模型配置和密钥在完整设置页中管理。</p>
+        </div>
+
+        <form id="routingForm" class="stack-form">
+          <label class="field">
+            <span>答题模式</span>
+            <select id="routingMode">
+              <option value="fast">极速：优先本地/主模型</option>
+              <option value="balanced">均衡：低置信度时复核</option>
+              <option value="rigorous">严谨：双模型复核</option>
+              <option value="private">隐私：禁止外部请求</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>快速模型</span>
+            <select id="fastProfileSelect"></select>
+          </label>
+          <label class="field">
+            <span>主模型</span>
+            <select id="primaryProfileSelect"></select>
+          </label>
+          <label class="field">
+            <span>复核模型 <em>可选</em></span>
+            <select id="verifierProfileSelect"></select>
+          </label>
+          <label class="field">
+            <span>备用模型 <em>可选</em></span>
+            <select id="fallbackProfileSelect"></select>
+          </label>
+          <label class="field">
+            <span>Benchmark API 地址</span>
+            <input id="benchmarkApiUrl" type="url" inputmode="url" placeholder="http://127.0.0.1:8765/api/v1" />
+          </label>
+
+          <fieldset class="settings-subsection">
+            <legend>本地 RAG / Embedding</legend>
+            <label class="inline-toggle">
+              <input id="ragEnabled" type="checkbox" />
+              <span>解题时启用检索增强</span>
+            </label>
+            <label class="field">
+              <span>检索 Endpoint</span>
+              <input id="ragEndpoint" type="url" inputmode="url" placeholder="http://127.0.0.1:8787/retrieve" />
+            </label>
+            <div class="two-column">
+              <label class="field">
+                <span>知识库集合 <em>可选</em></span>
+                <input id="ragCollection" type="text" maxlength="80" placeholder="network-security" />
+              </label>
+              <label class="field">
+                <span>召回 Top K</span>
+                <input id="ragTopK" type="number" min="1" max="10" value="3" />
+              </label>
+            </div>
+          </fieldset>
+          <button class="button button-primary button-wide" type="submit">保存答题设置</button>
+        </form>
+
+        <article class="card model-settings-card">
+          <div>
+            <strong id="profileSummary">尚未配置模型</strong>
+            <p>支持 OpenAI-compatible 和 Anthropic Messages 协议。</p>
+          </div>
+          <button id="openOptionsButton" class="button button-secondary" type="button">管理模型</button>
+        </article>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+    <script type="module" src="./sidepanel.js"></script>
+  </body>
+</html>

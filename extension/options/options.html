@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>CyberWikiBench · 模型设置</title>
+    <link rel="stylesheet" href="./options.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="page-header">
+        <a class="brand" href="#top" aria-label="CyberWikiBench 模型设置">
+          <span class="brand-mark" aria-hidden="true">CW</span>
+          <span><strong>CyberWikiBench</strong><small>模型配置中心</small></span>
+        </a>
+        <div id="profileCount" class="profile-count">正在读取配置…</div>
+      </header>
+
+      <section class="hero" id="top">
+        <p class="eyebrow">MODEL PROFILES</p>
+        <h1>配置 OpenAI 与 Anthropic 模型</h1>
+        <p>每个模型配置可作为主模型、复核模型或 Benchmark 测试模型。密钥不会包含在导出的普通设置中。</p>
+      </section>
+
+      <div class="workspace-grid">
+        <section class="profiles-section" aria-labelledby="profilesHeading">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">SAVED PROFILES</p>
+              <h2 id="profilesHeading">已保存模型</h2>
+            </div>
+            <button id="newProfileButton" class="button button-secondary" type="button">+ 新建配置</button>
+          </div>
+          <div id="profileList" class="profile-list" aria-live="polite"></div>
+        </section>
+
+        <section class="form-section" aria-labelledby="formHeading">
+          <div class="section-heading">
+            <div>
+              <p id="formKicker" class="section-kicker">NEW PROFILE</p>
+              <h2 id="formHeading">新建模型配置</h2>
+            </div>
+            <span id="editingBadge" class="editing-badge" hidden>编辑中</span>
+          </div>
+
+          <form id="profileForm" novalidate>
+            <input id="profileId" type="hidden" />
+            <div class="form-grid">
+              <label class="field field-wide">
+                <span>配置名称</span>
+                <input id="profileName" type="text" maxlength="80" autocomplete="off" placeholder="例如：Claude 复核模型" required />
+              </label>
+              <label class="field">
+                <span>接口协议</span>
+                <select id="profileProtocol" required>
+                  <option value="openai_chat_completions">OpenAI-compatible Chat Completions</option>
+                  <option value="anthropic_messages">Anthropic Messages</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>模型 ID</span>
+                <input id="profileModel" type="text" maxlength="200" autocomplete="off" placeholder="填写供应商模型名" required />
+              </label>
+              <label class="field">
+                <span>认证方式</span>
+                <select id="profileAuthMode" required>
+                  <option value="api_key">API Key</option>
+                  <option value="none">无需认证（本地服务）</option>
+                </select>
+              </label>
+              <label class="field field-wide">
+                <span>完整 Endpoint</span>
+                <input id="profileEndpoint" type="url" inputmode="url" autocomplete="url" placeholder="https://api.openai.com/v1/chat/completions" required />
+                <small id="endpointHint">使用 Chat Completions 兼容接口。</small>
+              </label>
+              <label id="apiKeyField" class="field field-wide">
+                <span id="apiKeyLabel">API Key <em>保存后留空即可保留原密钥</em></span>
+                <span class="key-input-wrap">
+                  <input id="profileApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" />
+                  <button id="toggleKeyButton" class="key-toggle" type="button" aria-label="显示 API Key">显示</button>
+                </span>
+                <small id="keyHint">开发版会保存在浏览器本地存储；请勿导出或共享密钥。</small>
+              </label>
+              <label class="field">
+                <span>请求超时（毫秒）</span>
+                <input id="profileTimeout" type="number" min="1000" max="300000" step="1000" value="30000" required />
+              </label>
+              <label class="field">
+                <span>最大输出 Token</span>
+                <input id="profileMaxTokens" type="number" min="16" max="8192" step="1" value="128" required />
+              </label>
+            </div>
+
+            <label class="toggle-row">
+              <input id="profileEnabled" type="checkbox" checked />
+              <span><strong>启用此模型</strong><small>禁用的模型不会出现在答题和 Benchmark 下拉列表中。</small></span>
+            </label>
+            <label class="toggle-row">
+              <input id="profileDefault" type="checkbox" />
+              <span><strong>设为默认模型</strong><small>新打开的 Side Panel 会优先选择它。</small></span>
+            </label>
+
+            <div class="form-actions">
+              <button id="testProfileButton" class="button button-secondary" type="button">测试连接</button>
+              <button id="saveProfileButton" class="button button-primary" type="submit">保存配置</button>
+            </div>
+            <p id="formStatus" class="form-status" role="status" aria-live="polite"></p>
+          </form>
+        </section>
+      </div>
+
+      <section class="security-note">
+        <span class="security-icon" aria-hidden="true">⌘</span>
+        <div>
+          <strong>密钥使用说明</strong>
+          <p>Content Script 无法读取 API Key。正式部署建议使用本地 Companion 或 Gateway 注入密钥；不要把 API Key 放入同步存储或提交到代码仓库。</p>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+    <script type="module" src="./options.js"></script>
+  </body>
+</html>

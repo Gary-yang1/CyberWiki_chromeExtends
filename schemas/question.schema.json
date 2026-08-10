@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyberwikibench.example/schemas/question.schema.json",
+  "title": "CyberWikiBench Question",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "type",
+    "stem",
+    "options",
+    "answer",
+    "source",
+    "metadata",
+    "explanation",
+    "evidence"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "type": {
+      "enum": ["single_choice", "true_false"]
+    },
+    "stem": {
+      "type": "string",
+      "minLength": 1
+    },
+    "options": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "text"],
+        "properties": {
+          "key": {"type": "string", "pattern": "^[A-Z]$"},
+          "text": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "answer": {},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["collection", "source_item_id", "reference"],
+      "properties": {
+        "collection": {"type": "string", "minLength": 1},
+        "source_item_id": {"type": "integer", "minimum": 1},
+        "reference": {"type": "string", "minLength": 1}
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "domain",
+        "subdomain",
+        "difficulty",
+        "reasoning_types",
+        "tags",
+        "version",
+        "quality_status"
+      ],
+      "properties": {
+        "domain": {"type": ["string", "null"]},
+        "subdomain": {"type": ["string", "null"]},
+        "difficulty": {"type": ["integer", "null"], "minimum": 1, "maximum": 5},
+        "reasoning_types": {"type": "array", "items": {"type": "string"}},
+        "tags": {"type": "array", "items": {"type": "string"}},
+        "version": {"type": ["string", "null"]},
+        "quality_status": {
+          "enum": ["unreviewed", "verified", "questionable", "rejected"]
+        }
+      }
+    },
+    "explanation": {"type": ["string", "null"]},
+    "evidence": {"type": "array", "items": {"type": "object"}}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"type": {"const": "single_choice"}}},
+      "then": {
+        "properties": {
+          "options": {"minItems": 2, "maxItems": 6},
+          "answer": {"type": "string", "pattern": "^[A-Z]$"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"type": {"const": "true_false"}}},
+      "then": {
+        "properties": {
+          "options": {"maxItems": 0},
+          "answer": {"type": "boolean"}
+        }
+      }
+    }
+  ]
+}
