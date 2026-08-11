@@ -7,6 +7,7 @@ export const DEFAULT_SYSTEM_PROMPT = [
   "根据题干和选项给出最可能正确的答案。",
   "只输出 JSON，不要输出 Markdown 或推理过程。",
   "单选题格式：{\"answer\":\"A\",\"confidence\":0.0}。",
+  "多选题格式：{\"answer\":[\"A\",\"B\"],\"confidence\":0.0}。",
   "判断题格式：{\"answer\":true,\"confidence\":0.0}。"
 ].join("\n");
 
@@ -73,7 +74,11 @@ function chromeStorageSet(value) {
   });
 }
 
-function normalizeProfile(profile) {
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+function normalizeProfile(profile = {}, existingProfile = null) {
   const now = new Date().toISOString();
   const protocol = profile.protocol === "anthropic_messages"
     ? "anthropic_messages"
@@ -86,9 +91,15 @@ function normalizeProfile(profile) {
     name: String(profile.name || "未命名模型").trim() || "未命名模型",
     protocol,
     endpoint: String(profile.endpoint || defaultEndpoint).trim(),
+    modelsEndpoint: String(profile.modelsEndpoint || "").trim(),
     model: String(profile.model || "").trim(),
     authMode: profile.authMode === "none" ? "none" : "api_key",
-    apiKey: String(profile.apiKey || ""),
+    // Settings pages intentionally receive sanitized profiles. Preserve the
+    // existing secret when their update omits this field, while still allowing
+    // an explicit empty string to clear it.
+    apiKey: hasOwn(profile, "apiKey")
+      ? String(profile.apiKey || "")
+      : String(existingProfile?.apiKey || ""),
     timeoutMs: Math.min(Math.max(Number(profile.timeoutMs) || 30_000, 1_000), 300_000),
     maxOutputTokens: Math.min(Math.max(Number(profile.maxOutputTokens) || 128, 16), 16_384),
     concurrency: Math.min(Math.max(Number(profile.concurrency) || 1, 1), 16),
@@ -104,14 +115,15 @@ function normalizeProfile(profile) {
 }
 
 function normalizeSettings(value = {}) {
+  const source = value && typeof value === "object" ? value : {};
   const merged = {
     ...DEFAULT_SETTINGS,
-    ...value,
-    routing: { ...DEFAULT_SETTINGS.routing, ...(value.routing || {}) },
-    rag: normalizeRag(value.rag)
+    ...source,
+    routing: { ...DEFAULT_SETTINGS.routing, ...(source.routing || {}) },
+    rag: normalizeRag(source.rag)
   };
-  merged.profiles = Array.isArray(value.profiles)
-    ? value.profiles.map(normalizeProfile)
+  merged.profiles = Array.isArray(source.profiles)
+    ? source.profiles.map(normalizeProfile)
     : [];
   if (!merged.profiles.some((profile) => profile.id === merged.defaultProfileId)) {
     merged.defaultProfileId = merged.profiles.find((profile) => profile.enabled)?.id || null;
@@ -127,6 +139,15 @@ export async function getSettings() {
   return normalizeSettings(saved[STORAGE_KEY]);
 }
 
+/**
+ * Returns a normalized settings snapshot that is safe to pass to extension UI.
+ * Background code should continue to use getSettings(), which retains secrets
+ * needed to call a model provider.
+ */
+export async function getPublicSettings() {
+  return sanitizeSettings(await getSettings());
+}
+
 export async function replaceSettings(settings) {
   const normalized = normalizeSettings(settings);
   await chromeStorageSet({ [STORAGE_KEY]: normalized });
@@ -135,16 +156,17 @@ export async function replaceSettings(settings) {
 
 export async function saveSettings(patch) {
   const current = await getSettings();
-  return replaceSettings({
+  const saved = await replaceSettings({
     ...current,
     ...patch,
     routing: { ...current.routing, ...(patch.routing || {}) },
     rag: { ...current.rag, ...(patch.rag || {}) }
   });
+  return sanitizeSettings(saved);
 }
 
 export async function listProfiles() {
-  return (await getSettings()).profiles;
+  return (await getPublicSettings()).profiles;
 }
 
 export async function getProfile(profileId) {
@@ -160,10 +182,12 @@ export async function getDefaultProfile() {
 
 export async function saveProfile(profile) {
   const settings = await getSettings();
-  const normalized = normalizeProfile(profile);
-  const index = settings.profiles.findIndex((item) => item.id === normalized.id);
+  const profileId = profile?.id;
+  const index = settings.profiles.findIndex((item) => item.id === profileId);
+  const existingProfile = index >= 0 ? settings.profiles[index] : null;
+  const normalized = normalizeProfile(profile, existingProfile);
   if (index >= 0) {
-    normalized.createdAt = settings.profiles[index].createdAt;
+    normalized.createdAt = existingProfile.createdAt;
     settings.profiles[index] = normalized;
   } else {
     settings.profiles.push(normalized);
@@ -175,7 +199,7 @@ export async function saveProfile(profile) {
     settings.routing.primaryProfileId = normalized.id;
   }
   await replaceSettings(settings);
-  return normalized;
+  return sanitizeProfile(normalized);
 }
 
 export async function deleteProfile(profileId) {
@@ -190,7 +214,7 @@ export async function deleteProfile(profileId) {
   if (!settings.routing.primaryProfileId) {
     settings.routing.primaryProfileId = settings.defaultProfileId;
   }
-  return replaceSettings(settings);
+  return sanitizeSettings(await replaceSettings(settings));
 }
 
 export async function setDefaultProfile(profileId) {
@@ -200,13 +224,51 @@ export async function setDefaultProfile(profileId) {
   }
   settings.defaultProfileId = profileId;
   settings.routing.primaryProfileId = profileId;
-  return replaceSettings(settings);
+  return sanitizeSettings(await replaceSettings(settings));
 }
 
 export function sanitizeProfile(profile) {
   if (!profile) return profile;
   const { apiKey, ...safe } = profile;
   return { ...safe, hasApiKey: Boolean(apiKey) };
+}
+
+export function sanitizeSettings(settings = {}) {
+  const { profiles, ...safe } = settings || {};
+  return {
+    ...safe,
+    profiles: Array.isArray(profiles) ? profiles.map(sanitizeProfile) : [],
+  };
+}
+
+/**
+ * Subscribes to updates of the persisted settings document. The callback gets
+ * a normalized, secret-free settings snapshot by default. Pass
+ * { includeSecrets: true } only from trusted background code that needs model
+ * credentials. The returned unsubscribe function is idempotent.
+ */
+export function subscribeToSettings(listener, { includeSecrets = false } = {}) {
+  if (typeof listener !== "function") {
+    throw new TypeError("subscribeToSettings requires a listener function");
+  }
+  const changeEvent = globalThis.chrome?.storage?.onChanged;
+  if (!changeEvent?.addListener || !changeEvent?.removeListener) {
+    return () => {};
+  }
+
+  let subscribed = true;
+  const handleChange = (changes, areaName) => {
+    if (!subscribed || areaName !== "local" || !hasOwn(changes, STORAGE_KEY)) return;
+    const settings = normalizeSettings(changes[STORAGE_KEY]?.newValue);
+    listener(includeSecrets ? settings : sanitizeSettings(settings));
+  };
+  changeEvent.addListener(handleChange);
+
+  return () => {
+    if (!subscribed) return;
+    subscribed = false;
+    changeEvent.removeListener(handleChange);
+  };
 }
 
 export function validateProfile(profile) {
@@ -223,15 +285,30 @@ export function validateProfile(profile) {
   return errors;
 }
 
-export async function requestOriginPermission(endpoint) {
+export function originPermissionPattern(endpoint) {
   const url = new URL(endpoint);
-  const origin = `${url.protocol}//${url.hostname}${url.port ? `:${url.port}` : ""}/*`;
-  const hasPermission = await new Promise((resolve) => {
-    chrome.permissions.contains({ origins: [origin] }, resolve);
-  });
-  if (hasPermission) return true;
-  return new Promise((resolve) => {
-    chrome.permissions.request({ origins: [origin] }, resolve);
+  if (!['https:', 'http:'].includes(url.protocol)) {
+    throw new TypeError("只能请求 http 或 https 网站的访问权限。");
+  }
+  return `${url.protocol}//${url.hostname}${url.port ? `:${url.port}` : ""}/*`;
+}
+
+/**
+ * Requests a declared optional host permission.  This intentionally calls
+ * permissions.request() directly: Chrome requires the request to happen
+ * during a user gesture, and an asynchronous contains() check first can lose
+ * that gesture in side panel and options-page event handlers.
+ */
+export function requestOriginPermission(endpoint) {
+  const origin = originPermissionPattern(endpoint);
+  return new Promise((resolve, reject) => {
+    chrome.permissions.request({ origins: [origin] }, (granted) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(Boolean(granted));
+    });
   });
 }
 

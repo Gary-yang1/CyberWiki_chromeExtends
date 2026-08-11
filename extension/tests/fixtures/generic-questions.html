@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Generic question extractor fixture</title>
+  <style>
+    body { font-family: sans-serif; }
+    section, article, fieldset, .field { margin: 20px; padding: 12px; border: 1px solid #ccc; }
+    label, [role="radio"], [role="checkbox"], .text-choice { display: block; margin: 4px; }
+  </style>
+  <script>
+    globalThis.__fixtureListeners = [];
+    globalThis.chrome = {
+      runtime: {
+        onMessage: {
+          addListener(listener) { globalThis.__fixtureListeners.push(listener); }
+        }
+      }
+    };
+  </script>
+</head>
+<body>
+  <div id="divQuestion">
+    <div id="wjx-single" class="field ui-field-contain" topic="1" type="3">
+      <div class="field-label">1.</div>
+      <div class="topichtml">哪一种协议用于安全浏览网页？</div>
+      <div class="ui-controlgroup">
+        <input id="wjx-a" type="radio" name="q1" value="1"><label for="wjx-a">A. HTTP</label>
+        <input id="wjx-b" type="radio" name="q1" value="2"><label for="wjx-b">B. HTTPS</label>
+        <input id="wjx-c" type="radio" name="q1" value="3"><label for="wjx-c">C. FTP</label>
+      </div>
+    </div>
+  </div>
+
+  <section class="question-card" data-question-id="native-multiple">
+    <h2>以下哪些属于多因素认证因子？（多选）</h2>
+    <form id="multi-form">
+      <label><input type="checkbox" name="factor" value="A"> A. 密码</label>
+      <label><input type="checkbox" name="factor" value="B"> B. 硬件令牌</label>
+      <label><input type="checkbox" name="factor" value="C"> C. 指纹</label>
+    </form>
+  </section>
+
+  <article data-question-id="aria-single">
+    <h2>ARIA 自定义控件题目</h2>
+    <div role="radiogroup" aria-label="答案">
+      <button role="radio" aria-checked="false">A. 第一项</button>
+      <button role="radio" aria-checked="false">B. 第二项</button>
+    </div>
+  </article>
+
+  <section data-question-id="generic-split">
+    <div class="plain-copy-with-no-known-stem-class">这个题干没有任何站点专用或题目语义类名。</div>
+    <div class="answers">
+      <input id="generic-a" type="radio" name="generic" value="A"><label for="generic-a">A. 第一项</label>
+      <input id="generic-b" type="radio" name="generic" value="B"><label for="generic-b">B. 第二项</label>
+    </div>
+  </section>
+
+  <section class="question-card" data-question-id="text-only">
+    <p class="prompt">没有表单控件时，哪一项是答案？</p>
+    <div class="text-choices">
+      <div class="text-choice">A、甲</div>
+      <div class="text-choice">B、乙</div>
+      <div class="text-choice">C、丙</div>
+      <div class="text-choice">D、丁</div>
+    </div>
+  </section>
+
+  <fieldset id="judgment">
+    <legend>HTTPS 默认使用 TLS 保护传输。</legend>
+    <label><input type="radio" name="judge" value="1">正确</label>
+    <label><input type="radio" name="judge" value="0">错误</label>
+  </fieldset>
+
+  <section class="question-card" data-question-id="options-without-stem">
+    <label><input type="radio" name="no-stem" value="A">A. 只有选项甲</label>
+    <label><input type="radio" name="no-stem" value="B">B. 只有选项乙</label>
+  </section>
+
+  <nav>A normal navigation sentence B normal navigation sentence</nav>
+  <pre id="result">pending</pre>
+
+  <script src="/content/question-heuristics.js"></script>
+  <script src="/content/content-script.js"></script>
+  <script>
+    let submitCount = 0;
+    document.querySelector("#multi-form").addEventListener("submit", () => { submitCount += 1; });
+    const listener = globalThis.__fixtureListeners[0];
+    listener({ type: "CWKB_EXTRACT_PAGE", payload: {} }, {}, (extraction) => {
+      listener({
+        type: "CWKB_FILL_ANSWER",
+        payload: { questionId: "native-multiple", answer: ["A", "C"] }
+      }, {}, (fill) => {
+        const checked = [...document.querySelectorAll("#multi-form input")]
+          .filter((input) => input.checked)
+          .map((input) => input.value);
+        document.querySelector("#result").textContent = JSON.stringify({ extraction, fill, checked, submitCount }, null, 2);
+        document.documentElement.dataset.fixtureReady = "true";
+      });
+    });
+  </script>
+</body>
+</html>

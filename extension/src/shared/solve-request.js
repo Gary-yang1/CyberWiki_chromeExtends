@@ -3,7 +3,7 @@ import { ProviderError } from "./provider-error.js";
 const DEFAULT_SYSTEM_PROMPT = [
   "You are a careful cybersecurity knowledge question solver.",
   "Return only one JSON object with keys answer, confidence, and explanation.",
-  "For single-choice questions answer with the exact option key. For true/false questions answer with true or false.",
+  "For single-choice questions answer with the exact option key. For multiple-choice questions answer with an array of exact option keys. For true/false questions answer with true or false.",
   "confidence must be a number from 0 to 1. Keep explanation concise.",
 ].join(" ");
 

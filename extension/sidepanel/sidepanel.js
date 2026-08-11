@@ -1,9 +1,8 @@
 import {
-  getDefaultProfile,
-  getSettings,
-  listProfiles,
+  getPublicSettings,
   requestOriginPermission,
   saveSettings,
+  subscribeToSettings,
 } from "../src/shared/storage.js";
 
 const EMPTY_OPTION_VALUE = "";
@@ -15,9 +14,11 @@ const state = {
   extractedQuestion: null,
   extractedQuestions: [],
   extractedTabId: null,
+  activePageTarget: null,
   solveResult: null,
   benchmarkResult: null,
   benchmarkPollTimer: null,
+  unsubscribeSettings: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -53,8 +54,16 @@ function formatPercent(value) {
 
 function answerLabel(answer, type) {
   if (answer === undefined || answer === null || answer === "") return "未作答";
+  if (Array.isArray(answer)) return answer.map((item) => String(item).toUpperCase()).join(", ");
   if (type === "true_false" || typeof answer === "boolean") return answer === true || answer === "true" ? "正确" : "错误";
   return String(answer).toUpperCase();
+}
+
+function questionTypeLabel(type, short = false) {
+  if (type === "true_false") return short ? "判断" : "判断题";
+  if (type === "multiple_choice") return short ? "多选" : "多选题";
+  if (type === "choice_unknown") return short ? "选择" : "选择题（类型待确认）";
+  return short ? "单选" : "单选题";
 }
 
 function showToast(message, variant = "default") {
@@ -105,6 +114,58 @@ function sendMessage(type, payload = {}) {
   });
 }
 
+function setActivePageTarget(tab) {
+  try {
+    const url = new URL(tab?.url || "");
+    if (!tab?.id || !['http:', 'https:'].includes(url.protocol)) {
+      state.activePageTarget = null;
+      return null;
+    }
+    state.activePageTarget = {
+      tabId: tab.id,
+      url: url.href,
+      origin: url.origin,
+    };
+    return state.activePageTarget;
+  } catch {
+    state.activePageTarget = null;
+    return null;
+  }
+}
+
+async function refreshActivePageTarget() {
+  if (!globalThis.chrome?.tabs?.query) return null;
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  return setActivePageTarget(tab);
+}
+
+function trackActivePageTarget() {
+  if (!globalThis.chrome?.tabs) return;
+  chrome.tabs.onActivated?.addListener(() => {
+    refreshActivePageTarget().catch(() => undefined);
+  });
+  chrome.tabs.onUpdated?.addListener((_tabId, changeInfo, tab) => {
+    if (tab?.active && changeInfo.url) setActivePageTarget(tab);
+  });
+  window.addEventListener("focus", () => {
+    refreshActivePageTarget().catch(() => undefined);
+  });
+}
+
+async function requestCurrentPagePermission() {
+  const target = state.activePageTarget;
+  if (!target) {
+    throw new Error("未识别到可读取的网页标签。请切换到问卷页面，等待片刻后再点击提取。");
+  }
+  // requestOriginPermission() must be the first asynchronous extension API
+  // called from this button flow, so Chrome can associate it with the click.
+  const granted = await requestOriginPermission(target.url);
+  if (!granted) {
+    throw new Error(`未获得 ${target.origin} 的读取权限。请在浏览器弹窗中允许后重试。`);
+  }
+  return target;
+}
+
 function activateTab(tab) {
   document.querySelectorAll(".tab-button").forEach((button) => {
     const active = button.dataset.tab === tab;
@@ -148,17 +209,39 @@ function populateProfileSelect(select, { optional = false, selectedId } = {}) {
   select.value = availableIds.includes(currentId) ? currentId : fallback;
 }
 
-function renderProfileSelects() {
+function selectedProfileValues() {
+  return {
+    assistant: $("#assistantProfileSelect")?.value,
+    benchmark: $("#benchmarkProfileSelect")?.value,
+    fast: $("#fastProfileSelect")?.value,
+    primary: $("#primaryProfileSelect")?.value,
+    verifier: $("#verifierProfileSelect")?.value,
+    fallback: $("#fallbackProfileSelect")?.value,
+  };
+}
+
+function renderProfileSelects(selected = {}) {
   const routing = state.settings.routing || state.settings;
-  populateProfileSelect($("#assistantProfileSelect"), { selectedId: routing.primaryProfileId || state.defaultProfileId });
-  populateProfileSelect($("#benchmarkProfileSelect"), { selectedId: routing.primaryProfileId || state.defaultProfileId });
-  populateProfileSelect($("#fastProfileSelect"), { optional: true, selectedId: routing.fastProfileId });
-  populateProfileSelect($("#primaryProfileSelect"), { selectedId: routing.primaryProfileId || state.defaultProfileId });
-  populateProfileSelect($("#verifierProfileSelect"), { optional: true, selectedId: routing.verifierProfileId });
-  populateProfileSelect($("#fallbackProfileSelect"), { optional: true, selectedId: routing.fallbackProfileId });
+  populateProfileSelect($("#assistantProfileSelect"), { selectedId: selected.assistant ?? (routing.primaryProfileId || state.defaultProfileId) });
+  populateProfileSelect($("#benchmarkProfileSelect"), { selectedId: selected.benchmark ?? (routing.primaryProfileId || state.defaultProfileId) });
+  populateProfileSelect($("#fastProfileSelect"), { optional: true, selectedId: selected.fast ?? routing.fastProfileId });
+  populateProfileSelect($("#primaryProfileSelect"), { selectedId: selected.primary ?? (routing.primaryProfileId || state.defaultProfileId) });
+  populateProfileSelect($("#verifierProfileSelect"), { optional: true, selectedId: selected.verifier ?? routing.verifierProfileId });
+  populateProfileSelect($("#fallbackProfileSelect"), { optional: true, selectedId: selected.fallback ?? routing.fallbackProfileId });
   $("#profileSummary").textContent = state.profiles.length
     ? `已配置 ${state.profiles.length} 个模型${state.defaultProfileId ? "，已选择默认模型" : ""}`
     : "尚未配置模型";
+}
+
+function applyStoredSettings(settings, { preserveSelections = true } = {}) {
+  const selected = preserveSelections ? selectedProfileValues() : {};
+  state.settings = settings || {};
+  state.profiles = asArray(settings?.profiles);
+  state.defaultProfileId = profileId(settings?.defaultProfileId)
+    || state.profiles.find((profile) => profile.enabled !== false)?.id
+    || null;
+  renderProfileSelects(selected);
+  setConnectionState(state.profiles.length ? "ready" : "error", state.profiles.length ? "模型已就绪" : "未配置模型");
 }
 
 function applySettingsToForm() {
@@ -197,7 +280,7 @@ function resetSolveResult() {
 }
 
 function questionPickerText(question, index) {
-  const type = question.type === "true_false" ? "判断" : "选择";
+  const type = questionTypeLabel(question.type, true);
   const stem = String(question.stem || "").replace(/\s+/g, " ").trim();
   const preview = stem.length > 46 ? `${stem.slice(0, 46)}…` : stem;
   return `第 ${index + 1} 题 · ${type} · ${preview || "未识别题干"}`;
@@ -248,7 +331,7 @@ function renderQuestion(question) {
   meta.className = "question-meta";
   const type = document.createElement("span");
   type.className = "mini-badge";
-  type.textContent = question.type === "true_false" ? "判断题" : "单选题";
+  type.textContent = questionTypeLabel(question.type);
   if (question.sourceUrl) {
     const source = document.createElement("span");
     source.className = "mini-badge";
@@ -283,7 +366,11 @@ function renderSolveResult(result, question = state.extractedQuestion) {
 
   card.classList.remove("is-empty");
   $("#answerRoute").textContent = route;
-  $("#fillAnswerButton").disabled = !question?.id || answer === undefined || answer === null || answer === "";
+  $("#fillAnswerButton").disabled = !question?.id
+    || answer === undefined
+    || answer === null
+    || answer === ""
+    || (Array.isArray(answer) && !answer.length);
   root.className = "answer-result is-result";
   root.replaceChildren();
 
@@ -295,7 +382,7 @@ function renderSolveResult(result, question = state.extractedQuestion) {
   answerValue.textContent = answerLabel(answer, question?.type);
   const answerCaption = document.createElement("p");
   answerCaption.className = "answer-caption";
-  answerCaption.textContent = `由 ${profileName(state.profiles.find((profile) => profile.id === (result.profileId || $("#assistantProfileSelect").value)))} 给出`;
+  answerCaption.textContent = `由 ${result.profileName || profileName(state.profiles.find((profile) => profile.id === (result.profileId || $("#assistantProfileSelect").value)))} 给出`;
   answerBlock.append(answerValue, answerCaption);
 
   const metrics = document.createElement("div");
@@ -347,7 +434,11 @@ async function extractQuestion() {
   const button = $("#extractButton");
   setButtonBusy(button, true, "正在提取…");
   try {
-    const response = await sendMessage("EXTRACT_CURRENT_QUESTION");
+    const target = await requestCurrentPagePermission();
+    const response = await sendMessage("EXTRACT_CURRENT_QUESTION", {
+      tabId: target.tabId,
+      expectedOrigin: target.origin,
+    });
     const allQuestions = asArray(response?.questions).map(normalizeQuestion);
     const currentQuestion = response?.question ? normalizeQuestion(response.question) : allQuestions[0];
     state.extractedQuestions = allQuestions.length ? allQuestions : (currentQuestion ? [currentQuestion] : []);
@@ -387,6 +478,7 @@ async function solveQuestion() {
       ...(response?.result || response),
       evidence: response?.result?.evidence || response?.rag?.chunks || response?.evidence,
       profileId: response?.profile?.id || response?.result?.profileId || profileId,
+      profileName: response?.profile?.name || response?.profile?.model || undefined,
       tabId: response?.tabId ?? state.extractedTabId,
     };
     state.extractedTabId = state.solveResult.tabId ?? state.extractedTabId;
@@ -595,8 +687,13 @@ async function saveRouting(event) {
         throw new Error("未获得本地 RAG 服务的访问权限。请允许浏览器弹出的站点权限请求后重试。");
       }
     }
-    const updated = await saveSettings(patch);
-    state.settings = updated || { ...state.settings, ...patch };
+    await saveSettings(patch);
+    state.settings = {
+      ...state.settings,
+      ...patch,
+      routing: { ...(state.settings.routing || {}), ...patch.routing },
+      rag: { ...(state.settings.rag || {}), ...patch.rag },
+    };
     showToast("答题设置已保存。");
   } catch (error) {
     showToast(`保存失败：${error.message}`, "error");
@@ -659,22 +756,27 @@ function bindEvents() {
 
 async function init() {
   bindEvents();
+  trackActivePageTarget();
+  refreshActivePageTarget().catch(() => undefined);
   try {
-    const [profiles, settings, defaultProfile] = await Promise.all([
-      listProfiles(),
-      getSettings(),
-      getDefaultProfile(),
-    ]);
-    state.profiles = asArray(profiles);
+    const settings = await getPublicSettings();
     state.settings = settings || {};
-    state.defaultProfileId = profileId(defaultProfile) || state.settings.defaultProfileId || null;
+    state.profiles = asArray(settings?.profiles);
+    state.defaultProfileId = profileId(settings?.defaultProfileId)
+      || state.profiles.find((profile) => profile.enabled !== false)?.id
+      || null;
     applySettingsToForm();
     renderProfileSelects();
     setConnectionState(state.profiles.length ? "ready" : "error", state.profiles.length ? "模型已就绪" : "未配置模型");
+    state.unsubscribeSettings = subscribeToSettings((updatedSettings) => {
+      applyStoredSettings(updatedSettings, { preserveSelections: true });
+    });
   } catch (error) {
     setConnectionState("error", "加载失败");
     showToast(`无法读取插件设置：${error.message}`, "error");
   }
 }
+
+window.addEventListener("unload", () => state.unsubscribeSettings?.());
 
 init();
