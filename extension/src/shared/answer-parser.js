@@ -14,6 +14,10 @@ function isTrueFalseQuestion(question) {
   return ["true_false", "true-false", "boolean", "judgment", "judge"].includes(getQuestionType(question));
 }
 
+function isMultipleChoiceQuestion(question) {
+  return ["multiple_choice", "multiple-choice", "multiple", "multi_choice", "checkbox"].includes(getQuestionType(question));
+}
+
 function getOptionKeys(question) {
   const options = question?.options;
   if (Array.isArray(options)) {
@@ -109,6 +113,24 @@ export function normalizeAnswer(value, question) {
   }
 
   const options = getOptionKeys(question);
+  if (isMultipleChoiceQuestion(question)) {
+    const values = Array.isArray(value)
+      ? value
+      : asText(String(value))
+        .replace(/^\s*(?:答案|选项|answer|option|choice)\s*[:：是为-]?\s*/i, "")
+        .split(/[,，、;；\s]+/)
+        .filter(Boolean);
+    if (!values.length) return null;
+    const normalized = [];
+    for (const item of values) {
+      const raw = asText(String(item)).replace(/^\(?\s*|\s*[)）.、:：]$/g, "");
+      const exact = options.find((key) => key.toUpperCase() === raw.toUpperCase());
+      if (!exact) return null;
+      if (!normalized.includes(exact)) normalized.push(exact);
+    }
+    return options.filter((key) => normalized.includes(key));
+  }
+
   const raw = asText(String(value));
   if (!raw) {
     return null;
@@ -155,7 +177,9 @@ function plainTextCandidate(text, question) {
     const labeled = trimmed.match(/(?:答案|结论|answer)\s*[:：是为-]?\s*(true|false|正确|错误|对|错|是|否)/i);
     return labeled?.[1] || (firstLine.length <= 16 ? firstLine : undefined);
   }
-  const labeled = trimmed.match(/(?:答案|选项|answer|option|choice)\s*[:：是为-]?\s*\(?\s*([A-Za-z0-9]+)\s*\)?/i);
+  const labeled = isMultipleChoiceQuestion(question)
+    ? trimmed.match(/(?:答案|选项|answer|option|choice)\s*[:：是为-]?\s*([A-Za-z0-9]+(?:\s*[,，、;；\s]\s*[A-Za-z0-9]+)*)/i)
+    : trimmed.match(/(?:答案|选项|answer|option|choice)\s*[:：是为-]?\s*\(?\s*([A-Za-z0-9]+)\s*\)?/i);
   return labeled?.[1] || (firstLine.length <= 16 ? firstLine : undefined);
 }
 

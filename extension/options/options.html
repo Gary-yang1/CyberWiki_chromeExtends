@@ -60,8 +60,33 @@
               </label>
               <label class="field">
                 <span>模型 ID</span>
-                <input id="profileModel" type="text" maxlength="200" autocomplete="off" placeholder="填写供应商模型名" required />
+                <input id="profileModel" type="text" maxlength="200" autocomplete="off" placeholder="从下方列表选择，或手动填写" required />
+                <small>可从官方模型列表中选择；不支持模型列表的兼容服务仍可直接填写。</small>
               </label>
+              <section class="field field-wide model-catalog-field" aria-labelledby="modelCatalogHeading">
+                <div class="model-catalog-heading">
+                  <div>
+                    <span id="modelCatalogHeading">可用模型</span>
+                    <small id="modelCatalogSummary">使用当前 Endpoint、认证方式和 API Key 刷新列表。</small>
+                  </div>
+                  <button id="refreshModelsButton" class="button button-secondary model-refresh-button" type="button">刷新模型列表</button>
+                </div>
+                <div class="model-catalog-controls">
+                  <label class="model-search-field">
+                    <span>搜索模型</span>
+                    <input id="modelCatalogSearch" type="search" autocomplete="off" placeholder="按模型 ID 或所有者筛选" disabled />
+                  </label>
+                  <label class="model-show-all">
+                    <input id="showAllModels" type="checkbox" />
+                    <span>显示全部模型</span>
+                  </label>
+                </div>
+                <select id="modelCatalog" class="model-catalog-select" size="6" disabled aria-labelledby="modelCatalogHeading" aria-describedby="modelCatalogStatus modelCatalogMeta">
+                  <option value="">点击“刷新模型列表”后选择</option>
+                </select>
+                <p id="modelCatalogStatus" class="model-catalog-status" role="status" aria-live="polite"></p>
+                <p id="modelCatalogMeta" class="model-catalog-meta"></p>
+              </section>
               <label class="field">
                 <span>认证方式</span>
                 <select id="profileAuthMode" required>

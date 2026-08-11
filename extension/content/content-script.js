@@ -18,7 +18,6 @@
     installed: false,
     lastHoveredRoot: null,
     lastExtraction: new Map(),
-    generatedId: 0,
   };
 
   Object.defineProperty(globalThis, GLOBAL_KEY, {
@@ -27,6 +26,11 @@
     enumerable: false,
     writable: false,
   });
+
+  const heuristics = globalThis.__CWKB_QUESTION_HEURISTICS_V1__;
+  if (!heuristics) {
+    throw new Error("Question heuristics must be injected before the content script.");
+  }
 
   const QUESTION_ROOT_SELECTOR = [
     "[data-question-id]",
@@ -37,18 +41,35 @@
     ".question",
     "[class*='question-card']",
     "[data-testid*='question']",
+    // 问卷星的题目通常是 #divQuestion 下带 field / ui-field-contain 的卡片。
+    // 保持容器范围，避免把其他网页普通表单的 .field 当作题目。
+    "#divQuestion .field.ui-field-contain",
+    "#divQuestion [topic][type]",
     "fieldset",
   ].join(",");
 
-  const OPTION_SELECTOR = [
+  const CONTROL_SELECTOR = [
+    "input[type='radio']",
+    "input[type='checkbox']",
+    "[role='radio']",
+    "[role='checkbox']",
+  ].join(",");
+
+  const TEXT_OPTION_CANDIDATE_SELECTOR = [
     "[data-option-key]",
     "[data-option]",
     "[data-answer]",
     ".option-label",
     ".option",
+    ".answer-option",
     "[class*='option-label']",
-    "[role='radio']",
+    "[class*='answer-option']",
+    "[role='option']",
     "label",
+    "li",
+    "button",
+    "p",
+    "div",
   ].join(",");
 
   const STEM_SELECTOR = [
@@ -58,9 +79,25 @@
     ".question-text",
     ".question-title",
     ".question-content",
+    ".field-label",
+    ".topichtml",
+    ".topictext",
+    ".topic_title",
+    ".topic-title",
+    "[id^='divTitle']",
+    "[class*='topic-text']",
+    "[class*='topic-title']",
     ".stem",
     ".prompt",
     ".problem",
+    "legend",
+    "[role='heading']",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
     "[class*='question-stem']",
     "[data-testid*='stem']",
   ].join(",");
@@ -93,21 +130,11 @@
   }
 
   function normalizeDisplayText(value) {
-    return String(value ?? "")
-      .replace(/\u00a0/g, " ")
-      .replace(/\r\n?/g, "\n")
-      .split("\n")
-      .map((line) => line.replace(/[\t ]+$/g, ""))
-      .join("\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
+    return heuristics.normalizeDisplayText(value);
   }
 
   function canonicalText(value) {
-    return normalizeDisplayText(value)
-      .toLocaleLowerCase()
-      .replace(/[\s\u3000]+/g, "")
-      .replace(/[()（）\[\]【】.．、:：;；,，'"`~!！?？]/g, "");
+    return heuristics.canonicalText(value);
   }
 
   function canonicalAnswer(value) {
@@ -124,13 +151,56 @@
     // offscreen/test DOMs, while the question may still be the one the user
     // asked the extension to solve.  Ancestor styles reliably exclude truly
     // hidden template content.
-    for (let current = element; current instanceof Element; current = current.parentElement) {
+    for (let current = element; current instanceof Element; current = composedParent(current)) {
       const style = window.getComputedStyle(current);
       if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") {
         return false;
       }
     }
     return true;
+  }
+
+  function composedParent(element) {
+    if (!(element instanceof Element)) return null;
+    return element.parentElement || element.getRootNode?.()?.host || null;
+  }
+
+  function closestComposed(element, selector) {
+    for (let current = element; current instanceof Element; current = composedParent(current)) {
+      if (current.matches(selector)) return current;
+    }
+    return null;
+  }
+
+  function composedContains(container, element) {
+    for (let current = element; current instanceof Element; current = composedParent(current)) {
+      if (current === container) return true;
+    }
+    return false;
+  }
+
+  function searchRoots() {
+    const roots = [document];
+    for (let index = 0; index < roots.length; index += 1) {
+      const root = roots[index];
+      for (const element of root.querySelectorAll("*")) {
+        if (element.shadowRoot && element.shadowRoot.mode === "open") roots.push(element.shadowRoot);
+      }
+    }
+    return roots;
+  }
+
+  function queryAll(selector) {
+    const seen = new Set();
+    const matches = [];
+    for (const root of searchRoots()) {
+      for (const element of root.querySelectorAll(selector)) {
+        if (seen.has(element)) continue;
+        seen.add(element);
+        matches.push(element);
+      }
+    }
+    return matches;
   }
 
   function attrValue(element, names) {
@@ -154,37 +224,25 @@
 
   function getOptionElement(input) {
     if (!input) return null;
-    const closestLabel = input.closest("label");
+    const closestLabel = closestComposed(input, "label");
     if (closestLabel) return closestLabel;
     if (input.labels?.length) return input.labels[0];
 
     if (input.id) {
-      for (const label of document.querySelectorAll("label[for]")) {
+      for (const label of queryAll("label[for]")) {
         if (label.htmlFor === input.id) return label;
       }
     }
 
-    return input.closest("[role='radio'], [data-option-key], [data-option], .option, .option-label, [class*='option'], li") || input;
+    return closestComposed(input, "[role='radio'], [role='checkbox'], [data-option-key], [data-option], .option, .option-label, [class*='option'], li") || input;
   }
 
   function optionKeyFromText(text) {
-    const match = normalizeDisplayText(text).match(
-      /^\s*(?:[（(]\s*)?([A-Ha-h]|[1-9])(?:\s*[）).．、:：\-]|\s*\n|\s{2,})/
-    );
-    return match ? match[1].toUpperCase() : "";
+    return heuristics.optionKeyFromText(text);
   }
 
   function stripOptionPrefix(text, key) {
-    const source = normalizeDisplayText(text);
-    if (!key) return source;
-
-    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const prefix = new RegExp(
-      `^\\s*(?:[（(]\\s*)?${escaped}(?:\\s*[）).．、:：\\-]\\s*|\\s+|\\n+)`,
-      "i"
-    );
-    const stripped = source.replace(prefix, "");
-    return stripped || source;
+    return heuristics.stripOptionPrefix(text, key);
   }
 
   function normalizeOptionKey(rawKey, fallbackIndex) {
@@ -203,17 +261,14 @@
   }
 
   function booleanValue(value) {
-    const compact = canonicalText(value);
-    if (BOOLEAN_TRUE.has(compact)) return true;
-    if (BOOLEAN_FALSE.has(compact)) return false;
-    return null;
+    return heuristics.booleanValue(value);
   }
 
   function elementOptionKey(element, input, text, index) {
     const elementKey = attrValue(element, ANSWER_ATTRIBUTE_NAMES);
     const inputKey = attrValue(input, ANSWER_ATTRIBUTE_NAMES);
-    const explicit = elementKey || inputKey || input?.value || "";
-    return normalizeOptionKey(explicit || optionKeyFromText(text), index);
+    const explicit = elementKey || inputKey || optionKeyFromText(text) || input?.value || "";
+    return normalizeOptionKey(explicit, index);
   }
 
   function textForOptionElement(element, input) {
@@ -239,6 +294,8 @@
       _element: element,
       _input: input,
       _rawKey: key,
+      _controlKind: input.type === "checkbox" ? "checkbox" : "radio",
+      _explicitOption: true,
     };
   }
 
@@ -257,21 +314,20 @@
     });
   }
 
-  function inferQuestionType(options) {
-    if (options.length !== 2) return "single_choice";
-    const values = options.map((option) => {
-      const keyValue = booleanValue(option.key);
-      return keyValue === null ? booleanValue(option.text) : keyValue;
+  function inferQuestionType(options, group, root) {
+    return heuristics.inferQuestionType({
+      options,
+      controlKinds: group.controlKinds,
+      rootText: textWithLineBreaks(root),
     });
-    return values.includes(true) && values.includes(false) ? "true_false" : "single_choice";
   }
 
   function normalizeBooleanOptions(options) {
     const seen = new Set();
     return options.map((option) => {
-      const fromKey = booleanValue(option.key);
       const fromText = booleanValue(option.text);
-      const value = fromKey === null ? fromText : fromKey;
+      const fromKey = booleanValue(option.key);
+      const value = fromText === null ? fromKey : fromText;
       let key = value === true ? "true" : value === false ? "false" : option.key;
       if (seen.has(key)) key = option.key;
       seen.add(key);
@@ -279,101 +335,408 @@
     });
   }
 
-  function groupRadioInputs() {
-    const groups = new Map();
-    const formIds = new WeakMap();
-    const rootIds = new WeakMap();
-    let formIndex = 0;
-    let rootIndex = 0;
+  const nodeIds = new WeakMap();
+  let nextNodeId = 0;
 
-    for (const input of document.querySelectorAll("input[type='radio']")) {
-      // Design systems commonly hide the native radio and render its <label>
-      // as the visible choice.  Do not discard those usable controls merely
-      // because the input itself is visually hidden.
-      if (input.disabled || (!isVisible(input) && !isVisible(getOptionElement(input)))) continue;
-      const form = input.form || input.closest("form");
-      if (form && !formIds.has(form)) formIds.set(form, ++formIndex);
-      const root = input.closest(QUESTION_ROOT_SELECTOR);
-      if (root && !rootIds.has(root)) rootIds.set(root, ++rootIndex);
-      // Names are the normal grouping mechanism.  Scope them to a question
-      // container when available because some poorly-authored quiz pages reuse
-      // the same name for every question.
-      const rootHint = root ? `root-${rootIds.get(root)}` : "page";
-      const groupName = input.name || "unnamed";
-      const key = `${form ? formIds.get(form) : "page"}::${rootHint}::${groupName}`;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(input);
+  function nodeId(node) {
+    if (!node || (typeof node !== "object" && typeof node !== "function")) return "none";
+    if (!nodeIds.has(node)) nodeIds.set(node, ++nextNodeId);
+    return String(nodeIds.get(node));
+  }
+
+  function explicitQuestionRoot(element) {
+    return closestComposed(element, QUESTION_ROOT_SELECTOR);
+  }
+
+  function nearestChoiceContainer(element) {
+    return closestComposed(element, [
+      "fieldset",
+      "[role='radiogroup']",
+      "[role='group']",
+      ".options",
+      ".answers",
+      ".choices",
+      ".ui-controlgroup",
+      "ul",
+      "ol",
+    ].join(",")) || composedParent(getOptionElement(element) || element);
+  }
+
+  function discoverNativeGroups() {
+    const records = queryAll("input[type='radio'], input[type='checkbox']")
+      .filter((input) => !input.disabled && (isVisible(input) || isVisible(getOptionElement(input))))
+      .map((input) => {
+        const root = explicitQuestionRoot(input);
+        const form = input.form || closestComposed(input, "form");
+        const choiceContainer = nearestChoiceContainer(input);
+        const container = root || choiceContainer || form || composedParent(input);
+        const scope = root || form || container;
+        const kind = input.type === "checkbox" ? "checkbox" : "radio";
+        const name = String(input.name || "").trim();
+        return { input, root, form, container, choiceContainer, scope, kind, name };
+      });
+    const nameCounts = new Map();
+    for (const record of records) {
+      if (!record.name) continue;
+      const key = `${nodeId(record.scope)}::${record.kind}::${record.name}`;
+      nameCounts.set(key, (nameCounts.get(key) || 0) + 1);
     }
+    const groups = new Map();
+    for (const record of records) {
+      const namedKey = `${nodeId(record.scope)}::${record.kind}::${record.name}`;
+      const useName = record.name && (nameCounts.get(namedKey) || 0) >= 2;
+      const key = useName
+        ? `native-name::${namedKey}`
+        : `native-container::${nodeId(record.container)}::${record.kind}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          source: "native",
+          elements: [],
+          inputs: [],
+          controlKinds: [record.kind],
+          explicitRoot: record.root,
+          optionContainer: record.choiceContainer || record.root || record.container,
+          explicitOptions: true,
+        });
+      }
+      const group = groups.get(key);
+      group.elements.push(record.input);
+      group.inputs.push(record.input);
+    }
+    return [...groups.values()].filter((group) => group.elements.length >= 2 && group.elements.length <= 20);
+  }
 
-    return [...groups.values()].filter((inputs) => inputs.length >= 2);
+  function smallestContainerWithPeers(element, peers) {
+    for (let current = composedParent(element), depth = 0;
+      current instanceof Element && depth < 7;
+      current = composedParent(current), depth += 1) {
+      const contained = peers.filter((peer) => composedContains(current, peer));
+      if (contained.length >= 2 && contained.length <= 12) return current;
+    }
+    return null;
+  }
+
+  function discoverAriaGroups() {
+    const controls = queryAll("[role='radio'], [role='checkbox']")
+      .filter((element) => isVisible(element) && !element.matches("input"))
+      .filter((element) => !element.querySelector("input[type='radio'], input[type='checkbox']"));
+    const groups = new Map();
+    for (const element of controls) {
+      const kind = element.getAttribute("role") === "checkbox" ? "aria-checkbox" : "aria-radio";
+      const sameKind = controls.filter((peer) => peer.getAttribute("role") === element.getAttribute("role"));
+      const root = explicitQuestionRoot(element);
+      const choiceContainer = closestComposed(element, "[role='radiogroup'], [role='group'], fieldset, ul, ol")
+        || smallestContainerWithPeers(element, sameKind);
+      const container = root || choiceContainer;
+      if (!container) continue;
+      const key = `aria::${nodeId(container)}::${kind}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          source: "aria",
+          elements: [],
+          inputs: [],
+          controlKinds: [kind],
+          explicitRoot: root,
+          optionContainer: choiceContainer || root,
+          explicitOptions: true,
+        });
+      }
+      groups.get(key).elements.push(element);
+    }
+    return [...groups.values()].filter((group) => group.elements.length >= 2 && group.elements.length <= 12);
   }
 
   function lowestCommonAncestor(elements) {
     if (!elements.length) return null;
-    let candidate = elements[0];
-    while (candidate && !elements.every((element) => candidate.contains(element))) {
-      candidate = candidate.parentElement;
+    for (let candidate = elements[0]; candidate instanceof Element; candidate = composedParent(candidate)) {
+      if (elements.every((element) => composedContains(candidate, element))) return candidate;
     }
-    return candidate || document.body;
+    return null;
   }
 
-  function questionContainerForInputs(inputs) {
-    const explicit = inputs[0]?.closest(QUESTION_ROOT_SELECTOR);
-    if (explicit && inputs.every((input) => explicit.contains(input))) return explicit;
-
-    const common = lowestCommonAncestor(inputs);
-    const semantic = common?.closest("fieldset, li, article, section, [role='group'], div");
-    return semantic || common || document.body;
+  function optionFromElement(element, index, controlKind = "text") {
+    const rawText = textForOptionElement(element, null);
+    const parsed = heuristics.parseOptionText(rawText);
+    const explicit = attrValue(element, ANSWER_ATTRIBUTE_NAMES);
+    const boolean = booleanValue(rawText);
+    const rawKey = explicit || parsed?.key || (boolean === true ? "true" : boolean === false ? "false" : "");
+    const key = normalizeOptionKey(rawKey, index);
+    return {
+      key,
+      text: parsed?.text || stripOptionPrefix(rawText, key),
+      _element: element,
+      _input: null,
+      _rawKey: rawKey,
+      _controlKind: controlKind,
+      _explicitOption: Boolean(explicit || element.matches(".option, .option-label, .answer-option, [role='option'], [data-option], [data-answer]")),
+    };
   }
 
-  function getStemElement(root) {
-    if (!root?.querySelector) return null;
-    const candidates = [...root.querySelectorAll(STEM_SELECTOR)];
-    return candidates.find((candidate) => isVisible(candidate) && textWithLineBreaks(candidate)) || null;
+  function discoverTextCandidates() {
+    const candidates = [];
+    for (const element of queryAll(TEXT_OPTION_CANDIDATE_SELECTOR)) {
+      if (!isVisible(element) || element.matches("[role='radio'], [role='checkbox']")) continue;
+      if (element.matches("div") && element.children.length > 8) continue;
+      if (element.querySelector(CONTROL_SELECTOR)) continue;
+      if (element.matches("label") && element.control?.matches?.("input[type='radio'], input[type='checkbox']")) continue;
+      const rawText = textWithLineBreaks(element);
+      if (!rawText || rawText.length > 600) continue;
+      const parsed = heuristics.parseOptionText(rawText);
+      const explicit = Boolean(attrValue(element, ANSWER_ATTRIBUTE_NAMES))
+        || element.matches(".option, .option-label, .answer-option, [role='option'], [data-option], [data-answer]");
+      if (!parsed && !explicit) continue;
+      const option = optionFromElement(element, candidates.length, "text");
+      if (!option.text || option.text.length > 500) continue;
+      candidates.push({ element, option, explicit });
+    }
+
+    return candidates.filter((candidate) => !candidates.some((other) => {
+      if (candidate === other || !composedContains(candidate.element, other.element)) return false;
+      return !candidate.explicit || other.explicit;
+    }));
+  }
+
+  function sortInDocumentOrder(items) {
+    return [...items].sort((left, right) => {
+      if (left === right) return 0;
+      const position = left.compareDocumentPosition?.(right) || 0;
+      return position & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+    });
+  }
+
+  function discoverTextGroups() {
+    const candidates = discoverTextCandidates();
+    const groups = new Map();
+    for (const candidate of candidates) {
+      const root = explicitQuestionRoot(candidate.element);
+      const optionContainer = smallestContainerWithPeers(candidate.element, candidates.map((item) => item.element));
+      const container = root || optionContainer;
+      if (!container) continue;
+      const key = `text::${nodeId(container)}`;
+      if (!groups.has(key)) groups.set(key, { container, root, optionContainer, candidates: [] });
+      groups.get(key).candidates.push(candidate);
+    }
+
+    const results = [];
+    for (const { container, root, optionContainer, candidates: grouped } of groups.values()) {
+      const orderedElements = sortInDocumentOrder(grouped.map((item) => item.element));
+      const ordered = orderedElements.map((element) => grouped.find((item) => item.element === element));
+      const rawOptions = ordered.map((item, index) => ({ ...item.option, key: normalizeOptionKey(item.option._rawKey, index) }));
+      const sequential = Boolean(heuristics.keySequenceKind(rawOptions.map((option) => option.key)));
+      const runs = sequential || grouped.every((item) => item.explicit)
+        ? [rawOptions]
+        : heuristics.splitSequentialRuns(rawOptions);
+      for (const options of runs) {
+        if (options.length < 2 || options.length > 12) continue;
+        results.push({
+          source: "text",
+          elements: options.map((option) => option._element),
+          inputs: [],
+          options,
+          controlKinds: ["text"],
+          explicitRoot: root,
+          optionContainer: optionContainer || container,
+          explicitOptions: options.some((option) => option._explicitOption),
+        });
+      }
+    }
+    return results;
+  }
+
+  function cleanStemText(value) {
+    return normalizeDisplayText(value)
+      .replace(/^\s*(?:question|题目)\s*\d+\s*[:：#.-]?\s*/i, "")
+      .replace(/^\s*\d{1,4}\s*[.．、:：]\s*/, "")
+      .replace(/^\s*(?:\[|【|\()?\s*(?:单选题|多选题|判断题)\s*(?:\]|】|\))?\s*/i, "")
+      .trim();
+  }
+
+  function stemCandidateScore(element, text) {
+    const cleaned = cleanStemText(text);
+    if (!cleaned || /^[\d\s.．、:：*＊（()）-]+$/.test(cleaned)) return Number.NEGATIVE_INFINITY;
+    let score = Math.min(cleaned.length, 500) / 25;
+    const semanticHint = `${element.id || ""} ${typeof element.className === "string" ? element.className : ""}`;
+    if (/stem|question|title|topic|prompt|problem|field-label|topichtml/i.test(semanticHint)) score += 8;
+    if (element.matches("legend, [role='heading'], h1, h2, h3, h4, h5, h6")) score += 6;
+    if (element.querySelector(CONTROL_SELECTOR)) score -= 12;
+    if (heuristics.parseOptionText(cleaned)) score -= 10;
+    return score;
+  }
+
+  function stemElementCandidates(root, optionElements = []) {
+    if (!root?.querySelector) return [];
+    return [...root.querySelectorAll(STEM_SELECTOR)]
+      .filter((candidate) => isVisible(candidate)
+        && textWithLineBreaks(candidate)
+        && !optionElements.some((option) => composedContains(option, candidate) || candidate === option))
+      .map((element) => ({ element, score: stemCandidateScore(element, textWithLineBreaks(element)) }))
+      .filter((candidate) => Number.isFinite(candidate.score))
+      .sort((left, right) => right.score - left.score)
+      .map((candidate) => candidate.element);
+  }
+
+  function precedingStemText(root, optionContainer, optionElements) {
+    if (!(root instanceof Element) || !(optionContainer instanceof Element)) return "";
+    for (let current = optionContainer, depth = 0;
+      current instanceof Element && current !== root && depth < 5;
+      current = composedParent(current), depth += 1) {
+      const fragments = [];
+      let sibling = current.previousElementSibling;
+      for (let scanned = 0; sibling && scanned < 4; sibling = sibling.previousElementSibling, scanned += 1) {
+        if (!isVisible(sibling)) continue;
+        if (sibling.matches(CONTROL_SELECTOR) || sibling.querySelector(CONTROL_SELECTOR)) break;
+        if (optionElements.some((option) => composedContains(sibling, option))) break;
+        const text = cleanStemText(textWithLineBreaks(sibling));
+        if (!text || heuristics.parseOptionText(text) || /^[*＊\d\s.．、:：-]+$/.test(text)) continue;
+        fragments.unshift(text);
+      }
+      if (fragments.length) return fragments.join("\n");
+    }
+    return "";
+  }
+
+  function relativeChildPath(root, element) {
+    const path = [];
+    let current = element;
+    while (current instanceof Element && current !== root) {
+      const parent = current.parentElement;
+      if (!parent) return null;
+      path.unshift(Array.prototype.indexOf.call(parent.children, current));
+      current = parent;
+    }
+    return current === root ? path : null;
+  }
+
+  function resolveChildPath(root, path) {
+    let current = root;
+    for (const index of path || []) {
+      current = current?.children?.[index];
+      if (!current) return null;
+    }
+    return current;
   }
 
   function stemWithoutOptions(root, optionElements) {
     if (!root) return "";
     const clone = root.cloneNode(true);
-    const removable = new Set();
-
+    const paths = [];
     for (const element of optionElements) {
       if (!element) continue;
-      const path = [];
-      let current = element;
-      while (current && current !== root) {
-        path.push(current);
-        current = current.parentElement;
-      }
-      const original = path[path.length - 1] || element;
-      if (original && original !== root) removable.add(original);
+      const path = relativeChildPath(root, element);
+      if (path) paths.push(path);
     }
-
-    // Remove known option/control elements.  The clone avoids mutating the page.
-    for (const selector of ["input", "label", "[role='radio']", ".option", ".option-label", "[class*='option']"]) {
-      for (const element of clone.querySelectorAll(selector)) removable.add(element);
-    }
-    for (const element of removable) {
-      // An element cloned above can be unrelated to the cloned root; guard it.
-      if (element instanceof Element && clone.contains(element)) element.remove();
+    const clonedOptionElements = paths.map((path) => resolveChildPath(clone, path)).filter(Boolean);
+    for (const element of clonedOptionElements) element.remove();
+    for (const selector of [
+      "input",
+      "label",
+      "[role='radio']",
+      "[role='checkbox']",
+      "[role='option']",
+      ".option",
+      ".option-label",
+      ".answer-option",
+      "[class*='option-label']",
+      "[class*='answer-option']",
+    ]) {
+      for (const element of clone.querySelectorAll(selector)) element.remove();
     }
     return textWithLineBreaks(clone);
   }
 
-  function stemForQuestion(root, options) {
-    const directStem = getStemElement(root);
-    if (directStem) return textWithLineBreaks(directStem);
-    const stem = stemWithoutOptions(root, options.map((option) => option._element));
-    return stem.replace(/^\s*(?:question|题目)\s*\d+\s*[:：#.-]?\s*/i, "").trim();
+  function isUsableStem(value, options) {
+    const stem = cleanStemText(value);
+    if (!stem || stem.length < 2) return false;
+    const optionKeys = new Set(options.map((option) => canonicalAnswer(option.key)));
+    const optionTexts = new Set(options.map((option) => canonicalText(option.text)).filter(Boolean));
+    const lines = stem.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+    const lineIsOption = (line) => {
+      const parsed = heuristics.parseOptionText(line);
+      if (parsed && optionKeys.has(canonicalAnswer(parsed.key)) && optionTexts.has(canonicalText(parsed.text))) return true;
+      return optionTexts.has(canonicalText(line));
+    };
+    if (lines.length && lines.every(lineIsOption)) return false;
+
+    // Some layouts collapse all option rows onto one visual line. Remove the
+    // known option texts; if only their short keys remain, this is not a stem.
+    let residual = canonicalText(stem);
+    let matchedOptionTexts = 0;
+    for (const optionText of optionTexts) {
+      if (optionText.length < 2 || !residual.includes(optionText)) continue;
+      residual = residual.split(optionText).join("");
+      matchedOptionTexts += 1;
+    }
+    if (matchedOptionTexts >= 2) {
+      const keyCharacters = new Set([...optionKeys].join("").toLocaleLowerCase());
+      const meaningfulResidual = [...residual].filter((character) => !keyCharacters.has(character)).join("");
+      if (meaningfulResidual.length < 2) return false;
+    }
+    return true;
   }
 
-  function makeQuestionId(root, inputs, index) {
+  function stemForQuestion(root, options, optionContainer) {
+    const optionElements = options.map((option) => option._element).filter(Boolean);
+    for (const candidate of stemElementCandidates(root, optionElements)) {
+      const text = cleanStemText(textWithLineBreaks(candidate));
+      if (isUsableStem(text, options)) return { text, source: "semantic-element" };
+    }
+    const preceding = precedingStemText(root, optionContainer, optionElements);
+    if (isUsableStem(preceding, options)) return { text: preceding, source: "preceding-structure" };
+    const residual = cleanStemText(stemWithoutOptions(root, optionElements));
+    if (isUsableStem(residual, options)) return { text: residual, source: "container-minus-options" };
+    return { text: "", source: "none" };
+  }
+
+  function rootCandidatesForGroup(group) {
+    const candidates = [];
+    const explicit = group.explicitRoot;
+    if (explicit && group.elements.every((element) => composedContains(explicit, element))) candidates.push(explicit);
+    const common = lowestCommonAncestor(group.elements) || group.optionContainer;
+    for (let current = common, depth = 0;
+      current instanceof Element && depth < 8;
+      current = composedParent(current), depth += 1) {
+      if (!candidates.includes(current)) candidates.push(current);
+      if (current === document.body || current === document.documentElement) break;
+    }
+    return candidates;
+  }
+
+  function locateQuestionRoot(group, options) {
+    let best = null;
+    const optionCount = options.length;
+    for (const [depth, root] of rootCandidatesForGroup(group).entries()) {
+      const stemResult = stemForQuestion(root, options, group.optionContainer);
+      const stem = stemResult.text;
+      const controlCount = root.querySelectorAll?.(CONTROL_SELECTOR).length || 0;
+      const rootIsDocument = root === document.body || root === document.documentElement;
+      const explicit = root.matches?.(QUESTION_ROOT_SELECTOR) || false;
+      const semantic = root.matches?.("fieldset, article, section, li, [role='group'], [role='radiogroup']")
+        || /question|quiz|problem|topic|prompt|exercise|field/i.test(String(root.className || ""));
+      let score = stem ? 5 : -4;
+      if (explicit) score += 5;
+      if (semantic) score += 2;
+      if (controlCount > Math.max(optionCount + 1, optionCount * 1.5)) score -= 4;
+      if (stem.length > 4000) score -= 3;
+      if (rootIsDocument) score -= 10;
+      score -= depth * 0.08;
+      if (!best || score > best.score) {
+        best = { root, stem, stemSource: stemResult.source, score, controlCount, explicit, rootIsDocument };
+      }
+    }
+    return best;
+  }
+
+  function makeQuestionId(root, inputs, index, stem = "") {
     const fromRoot = getQuestionDomId(root);
     if (fromRoot) return fromRoot;
     const fromInput = inputs[0]?.getAttribute("data-question-id") || inputs[0]?.name;
     if (fromInput) return fromInput;
-    state.generatedId += 1;
-    return `page-question-${index + 1}-${state.generatedId}`;
+    let hash = 2166136261;
+    for (const character of stem.slice(0, 300)) {
+      hash ^= character.charCodeAt(0);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `page-question-${index + 1}-${(hash >>> 0).toString(36)}`;
   }
 
   function publicQuestion(question) {
@@ -383,93 +746,81 @@
       stem: question.stem,
       options: question.options.map(({ key, text }) => ({ key, text })),
       sourceUrl: location.href,
-      pageAdapter: "generic-choice",
+      pageAdapter: "generic-semantic-choice",
+      confidence: question.confidence,
+      recognition: question.recognition,
     };
   }
 
-  function questionFromRadioGroup(inputs, index) {
-    const root = questionContainerForInputs(inputs);
-    let options = makeUniqueOptionKeys(inputs.map((input, optionIndex) => extractOption(input, optionIndex)));
-    if (options.some((option) => !option.text)) return null;
-    const type = inferQuestionType(options);
+  function questionFromGroup(group, index) {
+    const rawOptions = group.options
+      || group.elements.map((element, optionIndex) => group.source === "native"
+        ? extractOption(element, optionIndex)
+        : optionFromElement(element, optionIndex, group.controlKinds[0]));
+    const duplicateKeys = new Set(rawOptions.map((option) => String(option.key))).size !== rawOptions.length;
+    let options = makeUniqueOptionKeys(rawOptions);
+    if (options.length < 2 || options.length > 12 || options.some((option) => !option.text)) return null;
+    const located = locateQuestionRoot(group, options);
+    if (!located?.root || !located.stem) return null;
+    const type = inferQuestionType(options, group, located.root);
     if (type === "true_false") options = normalizeBooleanOptions(options);
-
-    const stem = stemForQuestion(root, options);
-    if (!stem) return null;
-    return {
-      id: makeQuestionId(root, inputs, index),
-      type,
-      stem,
-      options,
-      _root: root,
-    };
-  }
-
-  function candidateOptions(root) {
-    const candidates = [];
-    for (const element of root.querySelectorAll(OPTION_SELECTOR)) {
-      if (!isVisible(element)) continue;
-      if (element.matches("label") && element.querySelector("input[type='radio']")) continue;
-      const text = textWithLineBreaks(element);
-      if (!text) continue;
-      const hasExplicitKey = Boolean(attrValue(element, ANSWER_ATTRIBUTE_NAMES));
-      const hasLeadingKey = Boolean(optionKeyFromText(text));
-      if (!hasExplicitKey && !hasLeadingKey && !element.matches(".option-label, .option, [role='radio']")) continue;
-      candidates.push(element);
-    }
-
-    const filtered = candidates.filter((element) => !candidates.some((other) => other !== element && other.contains(element)));
-    return filtered.map((element, index) => {
-      const text = textForOptionElement(element, null);
-      const key = elementOptionKey(element, null, text, index);
-      return { key, text: stripOptionPrefix(text, key), _element: element, _input: null };
+    const sequenceKind = heuristics.keySequenceKind(options.map((option) => option.key));
+    const assessment = heuristics.scoreQuestionCandidate({
+      optionCount: options.length,
+      hasStem: Boolean(located.stem),
+      stemLength: located.stem.length,
+      sequentialKeys: Boolean(sequenceKind),
+      explicitOptions: group.explicitOptions,
+      controlKinds: group.controlKinds,
+      explicitRoot: located.explicit,
+      rootIsDocument: located.rootIsDocument,
+      duplicateKeys,
+      mixedControlCount: located.controlCount,
     });
-  }
-
-  function questionFromCard(root, index) {
-    // Native radios are handled by groupRadioInputs(), which retains the link
-    // needed for safe filling.  This fallback is only for custom labelled
-    // option buttons without a native input.
-    if (root.querySelector("input[type='radio']")) return null;
-    const options = makeUniqueOptionKeys(candidateOptions(root));
-    if (options.length < 2) return null;
-    const type = inferQuestionType(options);
-    const normalizedOptions = type === "true_false" ? normalizeBooleanOptions(options) : options;
-    const stem = stemForQuestion(root, normalizedOptions);
-    if (!stem) return null;
+    if (!assessment.accepted) return null;
     return {
-      id: makeQuestionId(root, [], index),
+      id: makeQuestionId(located.root, group.inputs, index, located.stem),
       type,
-      stem,
-      options: normalizedOptions,
-      _root: root,
+      stem: located.stem,
+      options,
+      confidence: assessment.confidence,
+      recognition: {
+        source: group.source,
+        stemSource: located.stemSource,
+        sequence: sequenceKind || undefined,
+        signals: assessment.signals,
+      },
+      _root: located.root,
+      _groupElements: group.elements,
     };
   }
 
-  function sameRadioSet(left, right) {
-    const leftInputs = new Set(left.options.map((option) => option._input).filter(Boolean));
-    const rightInputs = new Set(right.options.map((option) => option._input).filter(Boolean));
-    if (!leftInputs.size || leftInputs.size !== rightInputs.size) return false;
-    return [...leftInputs].every((input) => rightInputs.has(input));
+  function sameChoiceSet(left, right) {
+    const leftElements = new Set(left._groupElements || []);
+    const rightElements = new Set(right._groupElements || []);
+    if (!leftElements.size || leftElements.size !== rightElements.size) return false;
+    return [...leftElements].every((element) => rightElements.has(element));
   }
 
   function extractAllQuestions() {
     const extracted = [];
-    const radioGroups = groupRadioInputs();
-    radioGroups.forEach((inputs, index) => {
-      const question = questionFromRadioGroup(inputs, index);
-      if (question) extracted.push(question);
+    const groups = [
+      ...discoverNativeGroups(),
+      ...discoverAriaGroups(),
+      ...discoverTextGroups(),
+    ];
+    groups.forEach((group, index) => {
+      const question = questionFromGroup(group, index);
+      if (!question) return;
+      if (extracted.some((existing) => sameChoiceSet(existing, question))) return;
+      extracted.push(question);
     });
 
-    // Support pages that render labelled option buttons without native radios.
-    let cardIndex = extracted.length;
-    for (const root of document.querySelectorAll(QUESTION_ROOT_SELECTOR)) {
-      if (!isVisible(root)) continue;
-      const question = questionFromCard(root, cardIndex++);
-      if (!question) continue;
-      if (extracted.some((existing) => existing.id === question.id || sameRadioSet(existing, question))) continue;
-      extracted.push(question);
-    }
+    extracted.sort((left, right) => {
+      if (left._root === right._root) return 0;
+      const position = left._root?.compareDocumentPosition?.(right._root) || 0;
+      return position & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+    });
 
     // IDs are normally supplied by data-question-id.  Make generated/duplicate
     // IDs stable and unambiguous within this extraction response.
@@ -552,45 +903,62 @@
 
   function fillAnswer(payload = {}) {
     const answer = payload.answer ?? payload.value ?? payload.optionKey;
-    if (answer === undefined || answer === null || answer === "") {
+    if (answer === undefined || answer === null || answer === "" || (Array.isArray(answer) && !answer.length)) {
       throw new Error("FILL_ANSWER requires payload.answer.");
     }
 
     const question = descriptorForQuestion(payload.questionId || payload.id);
     if (!question) throw new Error("Question not found on the current page.");
 
-    const wanted = canonicalAnswer(answer);
-    const option = question.options.find((candidate) =>
-      canonicalAnswer(candidate.key) === wanted ||
-      canonicalAnswer(candidate.text) === wanted
+    const rawAnswers = Array.isArray(answer)
+      ? answer
+      : question.type === "multiple_choice"
+        ? String(answer).split(/[,，、;；\s]+/).filter(Boolean)
+        : [answer];
+    const wanted = new Set(rawAnswers.map(canonicalAnswer));
+    const selectedOptions = question.options.filter((candidate) =>
+      wanted.has(canonicalAnswer(candidate.key)) || wanted.has(canonicalAnswer(candidate.text))
     );
-    if (!option) {
-      throw new Error(`Answer '${String(answer)}' is not one of the extracted options.`);
+    if (selectedOptions.length !== wanted.size) {
+      throw new Error(`Answer '${rawAnswers.join(",")}' is not one of the extracted options.`);
+    }
+    if (question.type !== "multiple_choice" && selectedOptions.length !== 1) {
+      throw new Error("Single-choice questions require exactly one answer.");
     }
 
-    const input = option._input || option._element?.querySelector?.("input[type='radio'], input[type='checkbox']");
-    if (!input) {
-      throw new Error("The selected option has no native input to fill safely.");
+    const fillTargets = question.type === "multiple_choice" ? question.options : selectedOptions;
+    const controls = fillTargets.map((option) => ({
+      option,
+      input: option._input || option._element?.querySelector?.("input[type='radio'], input[type='checkbox']"),
+      checked: selectedOptions.includes(option),
+    }));
+    if (controls.some(({ input }) => !input)) {
+      throw new Error("The selected option group has no native inputs to fill safely.");
     }
-    if (input.disabled) throw new Error("The selected option is disabled.");
+    if (controls.some(({ input }) => input.disabled)) throw new Error("The selected option is disabled.");
 
-    const form = input.form || input.closest("form");
+    const form = controls[0].input.form || closestComposed(controls[0].input, "form");
     const preventSyntheticSubmit = (event) => {
       if (!event.isTrusted) event.preventDefault();
     };
     form?.addEventListener("submit", preventSyntheticSubmit, true);
     try {
-      nativeSetChecked(input, true);
-      dispatchValueEvents(input);
+      for (const { input, checked } of controls) {
+        if (Boolean(input.checked) === checked) continue;
+        nativeSetChecked(input, checked);
+        dispatchValueEvents(input);
+      }
     } finally {
       form?.removeEventListener("submit", preventSyntheticSubmit, true);
     }
 
     return {
       questionId: question.id,
-      answer: option.key,
+      answer: question.type === "multiple_choice"
+        ? selectedOptions.map((option) => option.key)
+        : selectedOptions[0].key,
       type: question.type,
-      filled: Boolean(input.checked),
+      filled: controls.every(({ input, checked }) => Boolean(input.checked) === checked),
       submitted: false,
     };
   }

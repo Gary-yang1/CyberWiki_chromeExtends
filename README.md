@@ -4,11 +4,19 @@ CyberWikiBench 是一个带图形化界面、HTTP API 和模型 CLI runner 的�
 
 ## 启动
 
-在 PowerShell 中运行：
+Windows PowerShell：
 
 ```powershell
 .\start_benchmark.ps1
 ```
+
+Linux / macOS：
+
+```bash
+./start_benchmark.sh
+```
+
+两个脚本都支持自定义监听地址和端口：PowerShell 使用 `-HostAddress 0.0.0.0 -Port 9000`；Bash 使用 `--host 0.0.0.0 --port 9000`。Linux 脚本优先使用 `$PYTHON`、Codex bundled Python，随后尝试 `python3` 和 `python`。
 
 然后打开 <http://127.0.0.1:8765>。默认只监听本机地址，运行数据保存在 `data/benchmark_runs.sqlite3`。
 

@@ -17,6 +17,7 @@
   "options_page": "options/options.html",
   "permissions": [
     "activeTab",
+    "tabs",
     "scripting",
     "storage",
     "sidePanel"

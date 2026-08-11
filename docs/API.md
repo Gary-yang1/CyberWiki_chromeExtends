@@ -41,6 +41,12 @@ POST /submissions →  summary + details（含评分）
 .\start_benchmark.ps1
 ```
 
+Linux / macOS：
+
+```bash
+./start_benchmark.sh
+```
+
 保持这个终端窗口运行，再打开另一个 PowerShell 窗口调用 API。
 
 ### 2. 检查服务和题库

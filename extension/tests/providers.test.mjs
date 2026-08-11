@@ -52,6 +52,21 @@ test("parses JSON and plain true/false outputs without coercing false", () => {
   }).confidence, null);
 });
 
+test("normalizes multiple-choice answers from JSON arrays and labeled text", () => {
+  const question = {
+    type: "multiple_choice",
+    stem: "Select every correct option",
+    options: [
+      { key: "A", text: "first" },
+      { key: "B", text: "second" },
+      { key: "C", text: "third" },
+    ],
+  };
+  assert.deepEqual(parseAnswerText('{"answer":["C","A"],"confidence":0.8}', { question }).answer, ["A", "C"]);
+  assert.deepEqual(parseAnswerText("答案：A, C", { question }).answer, ["A", "C"]);
+  assert.equal(parseAnswerText('{"answer":["A","Z"]}', { question }).answer, null);
+});
+
 test("validates an absolute endpoint and rejects reserved custom headers", () => {
   const valid = validateModelProfile({
     protocol: "openai_chat_completions",
