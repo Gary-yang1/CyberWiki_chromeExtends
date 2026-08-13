@@ -293,16 +293,10 @@ export function originPermissionPattern(endpoint) {
   return `${url.protocol}//${url.hostname}${url.port ? `:${url.port}` : ""}/*`;
 }
 
-/**
- * Requests a declared optional host permission.  This intentionally calls
- * permissions.request() directly: Chrome requires the request to happen
- * during a user gesture, and an asynchronous contains() check first can lose
- * that gesture in side panel and options-page event handlers.
- */
-export function requestOriginPermission(endpoint) {
+export function hasOriginPermission(endpoint) {
   const origin = originPermissionPattern(endpoint);
   return new Promise((resolve, reject) => {
-    chrome.permissions.request({ origins: [origin] }, (granted) => {
+    chrome.permissions.contains({ origins: [origin] }, (granted) => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
         return;
@@ -310,6 +304,30 @@ export function requestOriginPermission(endpoint) {
       resolve(Boolean(granted));
     });
   });
+}
+
+/**
+ * Requests a declared optional host permission.  This intentionally calls
+ * permissions.request() directly: Chrome requires the request to happen
+ * during a user gesture, and an asynchronous contains() check first can lose
+ * that gesture in side panel and options-page event handlers.
+ */
+export function requestOriginsPermission(endpoints) {
+  const origins = [...new Set((endpoints || []).map(originPermissionPattern))];
+  if (!origins.length) return Promise.resolve(true);
+  return new Promise((resolve, reject) => {
+    chrome.permissions.request({ origins }, (granted) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(Boolean(granted));
+    });
+  });
+}
+
+export function requestOriginPermission(endpoint) {
+  return requestOriginsPermission([endpoint]);
 }
 
 export function createProfile(protocol = "openai_chat_completions") {

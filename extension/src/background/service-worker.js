@@ -2,7 +2,7 @@ import {
   getDefaultProfile,
   getProfile,
   getSettings,
-  requestOriginPermission,
+  hasOriginPermission,
   saveProfile,
   sanitizeProfile,
 } from "../shared/storage.js";
@@ -201,9 +201,15 @@ async function resolveSolveRoute(settings, payload = {}) {
 }
 
 async function ensureEndpointPermission(endpoint, serviceLabel = "服务") {
-  const granted = await requestOriginPermission(endpoint);
+  // Background message handlers no longer have the click gesture required by
+  // permissions.request(). UI buttons request access first; background code
+  // only verifies that the exact target origin is already authorized.
+  const granted = await hasOriginPermission(endpoint);
   if (!granted) {
-    throw appError(`未获得 ${new URL(endpoint).origin} 的访问权限，无法访问${serviceLabel}。`, "HOST_PERMISSION_DENIED");
+    throw appError(
+      `尚未获得 ${new URL(endpoint).origin} 的访问权限。请从扩展界面的相应操作按钮重新授权后再访问${serviceLabel}。`,
+      "HOST_PERMISSION_REQUIRED",
+    );
   }
 }
 

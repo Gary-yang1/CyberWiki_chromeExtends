@@ -1,6 +1,7 @@
 import {
   getPublicSettings,
   requestOriginPermission,
+  requestOriginsPermission,
   saveSettings,
   subscribeToSettings,
 } from "../src/shared/storage.js";
@@ -677,15 +678,15 @@ async function saveRouting(event) {
   const button = event.currentTarget.querySelector("button[type=submit]");
   setButtonBusy(button, true, "正在保存…");
   try {
-    const benchmarkGranted = await requestOriginPermission(patch.benchmarkApiBaseUrl);
-    if (!benchmarkGranted) {
-      throw new Error("未获得 Benchmark API 的访问权限。请允许浏览器弹出的站点权限请求后重试。");
-    }
-    if (patch.rag.enabled) {
-      const ragGranted = await requestOriginPermission(patch.rag.endpoint);
-      if (!ragGranted) {
-        throw new Error("未获得本地 RAG 服务的访问权限。请允许浏览器弹出的站点权限请求后重试。");
-      }
+    // Ask for every required origin in one call. A second request after an
+    // awaited permission dialog would no longer be associated with this submit.
+    const endpoints = [
+      patch.benchmarkApiBaseUrl,
+      ...(patch.rag.enabled ? [patch.rag.endpoint] : []),
+    ];
+    const granted = await requestOriginsPermission(endpoints);
+    if (!granted) {
+      throw new Error("未获得 Benchmark 或 RAG 服务的访问权限。请允许浏览器弹出的站点权限请求后重试。");
     }
     await saveSettings(patch);
     state.settings = {

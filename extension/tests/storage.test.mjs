@@ -7,6 +7,7 @@ const storageListeners = new Set();
 globalThis.chrome = {
   runtime: { lastError: null },
   permissions: {
+    contains(_request, callback) { callback(true); },
     request(_request, callback) { callback(true); },
   },
   storage: {
@@ -35,9 +36,11 @@ globalThis.chrome = {
 const {
   STORAGE_KEY,
   getSettings,
+  hasOriginPermission,
   listProfiles,
   originPermissionPattern,
   requestOriginPermission,
+  requestOriginsPermission,
   saveProfile,
   subscribeToSettings,
 } = await import("../src/shared/storage.js");
@@ -111,4 +114,39 @@ test("requests an exact http(s) origin without a preflight permission lookup", a
   assert.equal(await requestOriginPermission("https://ks.wjx.com/vm/h7YPeR0.aspx"), true);
   assert.deepEqual(requests, [{ origins: ["https://ks.wjx.com/*"] }]);
   assert.throws(() => originPermissionPattern("chrome://extensions"), /http 或 https/);
+});
+
+test("checks an existing origin permission without requesting it again", async () => {
+  const checks = [];
+  let requestCount = 0;
+  globalThis.chrome.permissions.contains = (request, callback) => {
+    checks.push(request);
+    callback(true);
+  };
+  globalThis.chrome.permissions.request = (_request, callback) => {
+    requestCount += 1;
+    callback(true);
+  };
+
+  assert.equal(await hasOriginPermission("https://api.openai.com/v1/models"), true);
+  assert.deepEqual(checks, [{ origins: ["https://api.openai.com/*"] }]);
+  assert.equal(requestCount, 0);
+});
+
+test("requests multiple distinct origins in one user-gesture API call", async () => {
+  const requests = [];
+  globalThis.chrome.permissions.request = (request, callback) => {
+    requests.push(request);
+    callback(true);
+  };
+
+  assert.equal(await requestOriginsPermission([
+    "http://127.0.0.1:8765/api/v1",
+    "http://127.0.0.1:8787/retrieve",
+    "http://127.0.0.1:8765/health",
+  ]), true);
+  assert.deepEqual(requests, [{ origins: [
+    "http://127.0.0.1:8765/*",
+    "http://127.0.0.1:8787/*",
+  ] }]);
 });

@@ -6,6 +6,7 @@ import {
   setDefaultProfile,
   subscribeToSettings,
 } from "../src/shared/storage.js";
+import { deriveModelsEndpoint } from "../src/providers/model-catalog.js";
 
 const DEFAULT_ENDPOINTS = {
   openai_chat_completions: "https://api.openai.com/v1/chat/completions",
@@ -250,6 +251,18 @@ function validateCatalogProfile(profile) {
   return null;
 }
 
+function catalogPermissionProfile(profile) {
+  const stored = state.profiles.find((item) => item.id === (state.editingId || profile.id));
+  if (!stored) return profile;
+  return {
+    ...stored,
+    ...profile,
+    // A custom catalog endpoint belongs to the saved request endpoint. If the
+    // user changes that endpoint, derive a fresh /models URL instead.
+    ...(stored.endpoint !== profile.endpoint ? { modelsEndpoint: "" } : {}),
+  };
+}
+
 function applyCatalogResult(result) {
   const modelsById = new Map();
   const recommendedIds = new Set();
@@ -287,9 +300,12 @@ async function refreshModelCatalog() {
   setButtonBusy(button, true, "正在刷新…");
   setModelCatalogStatus("正在从模型服务获取可用模型…");
   try {
-    const permitted = await requestOriginPermission(profile.endpoint);
+    // Request the origin actually used by GET /models while this click still
+    // carries a user gesture. The service worker must only verify permission.
+    const modelsEndpoint = deriveModelsEndpoint(catalogPermissionProfile(profile));
+    const permitted = await requestOriginPermission(modelsEndpoint);
     if (!permitted) {
-      throw new Error("未获得该模型服务的访问权限。请允许浏览器弹出的站点权限请求后重试。");
+      throw new Error("未获得模型列表服务的访问权限。请允许浏览器弹出的站点权限请求后重试。");
     }
     const response = await sendMessage("LIST_PROVIDER_MODELS", {
       profile,
@@ -550,6 +566,10 @@ async function testCurrentProfile() {
   setButtonBusy(button, true, "正在测试…");
   setStatus("正在向模型服务发送最小测试请求…");
   try {
+    const permitted = await requestOriginPermission(profile.endpoint);
+    if (!permitted) {
+      throw new Error("未获得该模型 Endpoint 的访问权限。请允许浏览器弹出的站点权限请求后重试。");
+    }
     const response = await sendMessage("TEST_MODEL_CONNECTION", {
       profile,
       profileId: state.editingId || profile.id,
