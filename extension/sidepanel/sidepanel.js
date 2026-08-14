@@ -242,7 +242,30 @@ function applyStoredSettings(settings, { preserveSelections = true } = {}) {
     || state.profiles.find((profile) => profile.enabled !== false)?.id
     || null;
   renderProfileSelects(selected);
+  applyOverlaySettingsToForm();
   setConnectionState(state.profiles.length ? "ready" : "error", state.profiles.length ? "模型已就绪" : "未配置模型");
+}
+
+function normalizedOverlaySettings() {
+  const overlay = state.settings.overlay || {};
+  return {
+    enabled: overlay.enabled === true,
+    opacity: Math.min(Math.max(Number(overlay.opacity) || 0.68, 0.3), 1),
+    clickThrough: overlay.clickThrough === true,
+    collapsed: overlay.collapsed !== false,
+    position: {
+      right: Number(overlay.position?.right) || 18,
+      bottom: Number(overlay.position?.bottom) || 18,
+    },
+  };
+}
+
+function applyOverlaySettingsToForm() {
+  const overlay = normalizedOverlaySettings();
+  $("#overlayEnabled").checked = overlay.enabled;
+  $("#overlayOpacity").value = String(Math.round(overlay.opacity * 100));
+  $("#overlayClickThrough").checked = overlay.clickThrough;
+  $("#overlayOpacityValue").value = `${Math.round(overlay.opacity * 100)}%`;
 }
 
 function applySettingsToForm() {
@@ -255,6 +278,61 @@ function applySettingsToForm() {
   $("#ragEndpoint").value = rag.endpoint || "http://127.0.0.1:8787/retrieve";
   $("#ragCollection").value = rag.collection || "";
   $("#ragTopK").value = String(rag.topK || 3);
+  applyOverlaySettingsToForm();
+}
+
+function overlaySettingsFromForm() {
+  const previous = normalizedOverlaySettings();
+  return {
+    ...previous,
+    enabled: $("#overlayEnabled").checked,
+    opacity: Math.min(Math.max(Number($("#overlayOpacity").value) / 100, 0.3), 1),
+    clickThrough: $("#overlayClickThrough").checked,
+  };
+}
+
+function setOverlayStatus(message, variant = "") {
+  const node = $("#overlayStatus");
+  node.textContent = message;
+  node.className = `settings-help overlay-status${variant ? ` is-${variant}` : ""}`;
+}
+
+async function applyOverlayToCurrentPage() {
+  const overlay = overlaySettingsFromForm();
+  const button = $("#overlayApplyButton");
+  setButtonBusy(button, true, overlay.enabled ? "正在挂载…" : "正在关闭…");
+  try {
+    let target = state.activePageTarget;
+    if (overlay.enabled) {
+      if (!target) {
+        throw new Error("未识别到可注入的普通网页。请切换到目标网页后重试。");
+      }
+      // Permission request must remain the first asynchronous extension call
+      // in this user-gesture flow.
+      const granted = await requestOriginPermission(target.url);
+      if (!granted) {
+        throw new Error(`未获得 ${target.origin} 的页面权限。`);
+      }
+    }
+    const saved = await saveSettings({ overlay });
+    state.settings = { ...state.settings, ...saved, overlay: saved.overlay };
+    if (!overlay.enabled) target = null;
+    const result = await sendMessage("APPLY_LOW_INTERFERENCE_OVERLAY", {
+      ...(target ? { tabId: target.tabId, expectedOrigin: target.origin } : {}),
+    });
+    setOverlayStatus(
+      result?.visible
+        ? "浮窗已显示。展开后点“收起”可恢复小白点，悬停不会改变透明度。"
+        : "低干扰浮窗模式已关闭。",
+      "success",
+    );
+  } catch (error) {
+    const persisted = normalizedOverlaySettings();
+    $("#overlayEnabled").checked = persisted.enabled;
+    setOverlayStatus(error?.message || "无法更新浮窗。", "error");
+  } finally {
+    setButtonBusy(button, false);
+  }
 }
 
 function normalizeQuestion(data) {
@@ -749,6 +827,17 @@ function bindEvents() {
   $("#benchmarkForm").addEventListener("submit", runBenchmark);
   $("#copyBenchmarkButton").addEventListener("click", () => copyText(JSON.stringify(state.benchmarkResult, null, 2), "测试结果 JSON 已复制。"));
   $("#routingForm").addEventListener("submit", saveRouting);
+  $("#overlayEnabled").addEventListener("change", applyOverlayToCurrentPage);
+  $("#overlayClickThrough").addEventListener("change", () => {
+    if ($("#overlayEnabled").checked) applyOverlayToCurrentPage();
+  });
+  $("#overlayOpacity").addEventListener("input", (event) => {
+    $("#overlayOpacityValue").value = `${event.currentTarget.value}%`;
+  });
+  $("#overlayOpacity").addEventListener("change", () => {
+    if ($("#overlayEnabled").checked) applyOverlayToCurrentPage();
+  });
+  $("#overlayApplyButton").addEventListener("click", applyOverlayToCurrentPage);
   $("#openOptionsButton").addEventListener("click", () => {
     if (globalThis.chrome?.runtime?.openOptionsPage) chrome.runtime.openOptionsPage();
     else showToast("无法打开设置页面。", "error");

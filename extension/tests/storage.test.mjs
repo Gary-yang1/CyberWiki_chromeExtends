@@ -9,6 +9,8 @@ globalThis.chrome = {
   permissions: {
     contains(_request, callback) { callback(true); },
     request(_request, callback) { callback(true); },
+    getAll(_callback) { callback({ origins: [] }); },
+    remove(_request, callback) { callback(false); },
   },
   storage: {
     local: {
@@ -34,14 +36,19 @@ globalThis.chrome = {
 };
 
 const {
+  DEFAULT_OVERLAY_SETTINGS,
   STORAGE_KEY,
   getSettings,
   hasOriginPermission,
+  isRequiredOriginPattern,
+  listGrantedOrigins,
   listProfiles,
   originPermissionPattern,
+  removeOriginPermission,
   requestOriginPermission,
   requestOriginsPermission,
   saveProfile,
+  saveSettings,
   subscribeToSettings,
 } = await import("../src/shared/storage.js");
 
@@ -149,4 +156,65 @@ test("requests multiple distinct origins in one user-gesture API call", async ()
     "http://127.0.0.1:8765/*",
     "http://127.0.0.1:8787/*",
   ] }]);
+});
+
+test("lists granted origins and treats manifest-required patterns as fixed", async () => {
+  globalThis.chrome.permissions.getAll = (callback) => {
+    callback({
+      origins: [
+        "chrome-extension://extension-id/*",
+        "http://localhost/*",
+        "https://ks.wjx.com/*",
+        "http://127.0.0.1:8787/*",
+      ],
+    });
+  };
+  const removals = [];
+  globalThis.chrome.permissions.remove = (request, callback) => {
+    removals.push(request);
+    // Chrome cannot remove manifest-required permissions; simulate that.
+    callback(request.origins[0] !== "http://localhost/*");
+  };
+
+  assert.deepEqual(await listGrantedOrigins(), [
+    "http://127.0.0.1:8787/*",
+    "http://localhost/*",
+    "https://ks.wjx.com/*",
+  ]);
+  assert.equal(isRequiredOriginPattern("http://localhost/*"), true);
+  assert.equal(isRequiredOriginPattern("http://127.0.0.1/*"), true);
+  assert.equal(isRequiredOriginPattern("https://ks.wjx.com/*"), false);
+
+  assert.equal(await removeOriginPermission("https://ks.wjx.com/*"), true);
+  assert.equal(await removeOriginPermission("http://localhost/*"), false);
+  assert.deepEqual(removals, [
+    { origins: ["https://ks.wjx.com/*"] },
+    { origins: ["http://localhost/*"] },
+  ]);
+});
+
+test("normalizes and persists low-interference overlay preferences", async () => {
+  resetSettings();
+  const saved = await saveSettings({
+    overlay: {
+      enabled: true,
+      opacity: 0.1,
+      clickThrough: true,
+      collapsed: false,
+      position: { right: -20, bottom: 42 },
+    },
+  });
+
+  assert.deepEqual(saved.overlay, {
+    enabled: true,
+    opacity: 0.3,
+    clickThrough: true,
+    collapsed: false,
+    position: { right: 8, bottom: 42 },
+  });
+  const raw = await getSettings();
+  assert.deepEqual(raw.overlay, saved.overlay);
+
+  resetSettings();
+  assert.deepEqual((await getSettings()).overlay, DEFAULT_OVERLAY_SETTINGS);
 });

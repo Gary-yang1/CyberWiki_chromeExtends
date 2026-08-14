@@ -217,6 +217,25 @@
               </label>
             </div>
           </fieldset>
+
+          <fieldset class="settings-subsection overlay-settings">
+            <legend>低干扰浮窗</legend>
+            <label class="inline-toggle">
+              <input id="overlayEnabled" type="checkbox" />
+              <span>在已授权的普通网页显示紧凑浮窗</span>
+            </label>
+            <p class="settings-help">折叠后显示为 AssistiveTouch 风格的小白点：点击展开、按住拖动。展开后点“收起”即可恢复。关闭按钮只隐藏当前标签页，可从这里重新显示。</p>
+            <label class="field range-field">
+              <span>固定透明度（悬停不变） <output id="overlayOpacityValue" for="overlayOpacity">68%</output></span>
+              <input id="overlayOpacity" type="range" min="30" max="100" step="1" value="68" />
+            </label>
+            <label class="inline-toggle">
+              <input id="overlayClickThrough" type="checkbox" />
+              <span>内容区点击穿透（顶部仍可拖动、折叠和关闭）</span>
+            </label>
+            <button id="overlayApplyButton" class="button button-secondary button-wide overlay-apply-button" type="button">在当前页面显示或更新</button>
+            <p id="overlayStatus" class="settings-help overlay-status" aria-live="polite"></p>
+          </fieldset>
           <button class="button button-primary button-wide" type="submit">保存答题设置</button>
         </form>
 

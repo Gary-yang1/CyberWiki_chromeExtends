@@ -21,6 +21,17 @@ export const DEFAULT_RAG_SETTINGS = {
   headers: {}
 };
 
+export const DEFAULT_OVERLAY_SETTINGS = {
+  enabled: false,
+  opacity: 0.68,
+  clickThrough: false,
+  collapsed: true,
+  position: {
+    right: 18,
+    bottom: 18
+  }
+};
+
 const DEFAULT_SETTINGS = {
   schemaVersion: 1,
   benchmarkApiBaseUrl: DEFAULT_BENCHMARK_API,
@@ -33,7 +44,8 @@ const DEFAULT_SETTINGS = {
     confidenceThreshold: 0.85,
     enableVerification: false
   },
-  rag: DEFAULT_RAG_SETTINGS
+  rag: DEFAULT_RAG_SETTINGS,
+  overlay: DEFAULT_OVERLAY_SETTINGS
 };
 
 function normalizeRag(value = {}) {
@@ -47,6 +59,32 @@ function normalizeRag(value = {}) {
     timeoutMs: Math.min(Math.max(Number(value?.timeoutMs) || 3_000, 500), 30_000),
     maxContextCharacters: Math.min(Math.max(Number(value?.maxContextCharacters) || 6_000, 500), 20_000),
     headers: typeof value?.headers === "object" && value.headers ? value.headers : {}
+  };
+}
+
+function clampNumber(value, fallback, minimum, maximum) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric)
+    ? Math.min(Math.max(numeric, minimum), maximum)
+    : fallback;
+}
+
+export function normalizeOverlaySettings(value = {}) {
+  const source = value && typeof value === "object" ? value : {};
+  const position = source.position && typeof source.position === "object"
+    ? source.position
+    : {};
+  return {
+    ...DEFAULT_OVERLAY_SETTINGS,
+    ...source,
+    enabled: source.enabled === true,
+    opacity: clampNumber(source.opacity, DEFAULT_OVERLAY_SETTINGS.opacity, 0.3, 1),
+    clickThrough: source.clickThrough === true,
+    collapsed: source.collapsed !== false,
+    position: {
+      right: clampNumber(position.right, DEFAULT_OVERLAY_SETTINGS.position.right, 8, 10_000),
+      bottom: clampNumber(position.bottom, DEFAULT_OVERLAY_SETTINGS.position.bottom, 8, 10_000)
+    }
   };
 }
 
@@ -120,7 +158,8 @@ function normalizeSettings(value = {}) {
     ...DEFAULT_SETTINGS,
     ...source,
     routing: { ...DEFAULT_SETTINGS.routing, ...(source.routing || {}) },
-    rag: normalizeRag(source.rag)
+    rag: normalizeRag(source.rag),
+    overlay: normalizeOverlaySettings(source.overlay)
   };
   merged.profiles = Array.isArray(source.profiles)
     ? source.profiles.map(normalizeProfile)
@@ -160,7 +199,15 @@ export async function saveSettings(patch) {
     ...current,
     ...patch,
     routing: { ...current.routing, ...(patch.routing || {}) },
-    rag: { ...current.rag, ...(patch.rag || {}) }
+    rag: { ...current.rag, ...(patch.rag || {}) },
+    overlay: {
+      ...current.overlay,
+      ...(patch.overlay || {}),
+      position: {
+        ...current.overlay?.position,
+        ...(patch.overlay?.position || {})
+      }
+    }
   });
   return sanitizeSettings(saved);
 }
@@ -302,6 +349,45 @@ export function hasOriginPermission(endpoint) {
         return;
       }
       resolve(Boolean(granted));
+    });
+  });
+}
+
+// These mirror the manifest's required host_permissions. They are granted at
+// install time and can never be revoked at runtime, so the settings UI marks
+// them as built-in instead of offering a remove button.
+const REQUIRED_ORIGIN_PATTERNS = new Set(["http://127.0.0.1/*", "http://localhost/*"]);
+
+export function isRequiredOriginPattern(origin) {
+  return REQUIRED_ORIGIN_PATTERNS.has(String(origin || ""));
+}
+
+/** Every currently granted http(s) origin pattern, in sorted order. */
+export function listGrantedOrigins() {
+  return new Promise((resolve, reject) => {
+    chrome.permissions.getAll((permissions) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      const origins = Array.isArray(permissions?.origins) ? permissions.origins : [];
+      resolve(origins.filter((origin) => /^https?:\/\//.test(origin)).sort());
+    });
+  });
+}
+
+/**
+ * Revoke a previously granted optional origin. Resolves false when Chrome
+ * could not remove it, for example a manifest-required permission.
+ */
+export function removeOriginPermission(originPattern) {
+  return new Promise((resolve, reject) => {
+    chrome.permissions.remove({ origins: [String(originPattern)] }, (removed) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(Boolean(removed));
     });
   });
 }

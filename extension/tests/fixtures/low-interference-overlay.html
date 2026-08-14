@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Low-interference overlay fixture</title>
+    <style>
+      body { margin: 0; min-height: 100vh; background: #f3eee5; color: #243128; font: 16px/1.6 system-ui, sans-serif; }
+      main { width: min(820px, calc(100% - 40px)); margin: 56px auto; padding: 34px; border-radius: 18px; background: white; box-shadow: 0 20px 70px rgba(55, 44, 29, .12); }
+      label { display: block; margin: 12px 0; padding: 11px; border: 1px solid #ddd5c8; border-radius: 10px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>普通题目页面</h1>
+      <p>下列哪一个端口通常用于 SMB 服务？</p>
+      <label><input type="radio" name="answer" /> A. 22</label>
+      <label><input type="radio" name="answer" /> B. 80</label>
+      <label><input type="radio" name="answer" /> C. 445</label>
+      <label><input type="radio" name="answer" /> D. 3306</label>
+    </main>
+    <script>
+      const runtimeListeners = [];
+      globalThis.chrome = {
+        runtime: {
+          lastError: null,
+          onMessage: { addListener(listener) { runtimeListeners.push(listener); } },
+          sendMessage(message, callback) {
+            if (message.type === "CWKB_OVERLAY_READINESS") {
+              callback({ ok: true, data: { ready: true } });
+              return;
+            }
+            if (message.type === "CWKB_OVERLAY_ACTION" && message.payload.action === "extract") {
+              callback({ ok: true, data: { count: 1, question: { id: "fixture-question", stem: "下列哪一个端口通常用于 SMB 服务？", type: "single_choice" } } });
+              return;
+            }
+            if (message.type === "CWKB_OVERLAY_ACTION" && message.payload.action === "solve") {
+              callback({ ok: true, data: { question: { id: "fixture-question", stem: "下列哪一个端口通常用于 SMB 服务？", type: "single_choice" }, result: { answer: "C", confidence: 0.98, latencyMs: 420 } } });
+              return;
+            }
+            if (message.type === "CWKB_OVERLAY_ACTION" && message.payload.action === "fill") {
+              document.querySelectorAll("input")[2].checked = true;
+              callback({ ok: true, data: { filled: true, submitted: false } });
+              return;
+            }
+            callback({ ok: true, data: { saved: true } });
+          },
+        },
+      };
+      globalThis.showFixtureOverlay = () => {
+        for (const listener of runtimeListeners) {
+          listener({
+            type: "CWKB_OVERLAY_CONFIG",
+            payload: {
+              enabled: true,
+              opacity: 0.62,
+              clickThrough: false,
+              collapsed: true,
+              position: { right: 18, bottom: 18 },
+            },
+          }, {}, () => undefined);
+        }
+      };
+    </script>
+    <script src="../../content/low-interference-overlay.js"></script>
+    <script>showFixtureOverlay();</script>
+  </body>
+</html>

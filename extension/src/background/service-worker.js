@@ -1,9 +1,11 @@
 import {
+  STORAGE_KEY,
   getDefaultProfile,
   getProfile,
   getSettings,
   hasOriginPermission,
   saveProfile,
+  saveSettings,
   sanitizeProfile,
 } from "../shared/storage.js";
 import {
@@ -18,11 +20,17 @@ import { retrieveContext } from "../rag/client.js";
 
 const CONTENT_SCRIPT_FILE = "content/content-script.js";
 const QUESTION_HEURISTICS_FILE = "content/question-heuristics.js";
+const LOW_INTERFERENCE_OVERLAY_FILE = "content/low-interference-overlay.js";
 const CONTENT_MESSAGE_TYPES = new Set([
   "EXTRACT_CURRENT_QUESTION",
   "CWKB_EXTRACT_PAGE",
   "FILL_ANSWER",
   "CWKB_FILL_ANSWER",
+  "CWKB_OVERLAY_ACTION",
+  "CWKB_OVERLAY_POSITION",
+  "CWKB_OVERLAY_DISABLE",
+  "CWKB_OVERLAY_COLLAPSED",
+  "CWKB_OVERLAY_READINESS",
 ]);
 
 const extractedQuestions = new Map();
@@ -78,7 +86,7 @@ async function ensureContentScript(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: [QUESTION_HEURISTICS_FILE, CONTENT_SCRIPT_FILE],
+      files: [QUESTION_HEURISTICS_FILE, CONTENT_SCRIPT_FILE, LOW_INTERFERENCE_OVERLAY_FILE],
     });
   } catch (error) {
     const message = error?.message || "无法注入网页题目提取脚本。";
@@ -90,6 +98,156 @@ async function ensureContentScript(tabId) {
     }
     throw error;
   }
+}
+
+function publicOverlayConfig(settings) {
+  const overlay = settings?.overlay || {};
+  return {
+    enabled: overlay.enabled === true,
+    opacity: Number(overlay.opacity) || 0.68,
+    clickThrough: overlay.clickThrough === true,
+    collapsed: overlay.collapsed !== false,
+    position: {
+      right: Number(overlay.position?.right) || 18,
+      bottom: Number(overlay.position?.bottom) || 18,
+    },
+  };
+}
+
+async function hideOverlayOnTab(tabId) {
+  if (!Number.isInteger(tabId)) return;
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: "CWKB_OVERLAY_HIDE" });
+  } catch {
+    // A tab without the content script already has nothing to hide.
+  }
+}
+
+async function showOverlayOnTab(tab, settings, { force = false } = {}) {
+  validateExtractionTab(tab);
+  if (!settings?.overlay?.enabled) {
+    await hideOverlayOnTab(tab.id);
+    return { visible: false, tabId: tab.id };
+  }
+  if (!await hasOriginPermission(tab.url)) {
+    throw appError(
+      `尚未获得 ${new URL(tab.url).origin} 的页面权限。请从 Side Panel 开启浮窗并授权当前网站。`,
+      "HOST_PERMISSION_REQUIRED",
+    );
+  }
+  await ensureContentScript(tab.id);
+  const result = await chrome.tabs.sendMessage(tab.id, {
+    type: "CWKB_OVERLAY_CONFIG",
+    payload: { ...publicOverlayConfig(settings), force: force === true },
+  });
+  if (!result?.ok) {
+    throw appError(result?.error?.message || "低干扰浮窗未能完成挂载。", "OVERLAY_ERROR");
+  }
+  return { visible: true, tabId: tab.id, config: publicOverlayConfig(settings) };
+}
+
+async function syncOverlayToTab(tab) {
+  if (!tab?.id || !/^https?:/i.test(tab.url || "")) return;
+  const settings = await getSettings();
+  if (!settings.overlay?.enabled) {
+    await hideOverlayOnTab(tab.id);
+    return;
+  }
+  if (!await hasOriginPermission(tab.url)) return;
+  await showOverlayOnTab(tab, settings);
+}
+
+async function syncOverlayAcrossTabs() {
+  const tabs = await chrome.tabs.query({});
+  await Promise.allSettled(tabs.map(syncOverlayToTab));
+}
+
+async function overlayAction(sender, payload = {}) {
+  const tab = sender?.tab;
+  if (!tab?.id) throw appError("浮窗没有关联的网页标签页。", "OVERLAY_TAB_MISSING");
+  validateExtractionTab(tab);
+  const action = String(payload.action || "");
+  if (action === "extract") {
+    return extractCurrentQuestion(sender, { questionId: payload.questionId });
+  }
+  if (action === "solve") {
+    const extracted = await extractCurrentQuestion(sender, { questionId: payload.questionId });
+    return solveQuestion({
+      question: extracted.question,
+      mode: payload.mode,
+    }, sender);
+  }
+  if (action === "fill") {
+    return sendToContent(tab.id, {
+      type: "FILL_ANSWER",
+      payload: {
+        questionId: payload.questionId,
+        answer: payload.answer,
+      },
+    });
+  }
+  throw appError(`不支持的浮窗操作：${action || "空"}`, "OVERLAY_ACTION_UNSUPPORTED");
+}
+
+async function updateOverlayPosition(payload = {}) {
+  const settings = await getSettings();
+  if (!settings.overlay?.enabled) return { saved: false };
+  const updated = await saveSettings({
+    overlay: {
+      position: {
+        right: payload.right,
+        bottom: payload.bottom,
+      },
+    },
+  });
+  return { saved: true, position: updated.overlay.position };
+}
+
+async function disableOverlay() {
+  const settings = await getSettings();
+  const updated = await saveSettings({
+    overlay: { ...settings.overlay, enabled: false },
+  });
+  return { disabled: true, overlay: updated.overlay };
+}
+
+async function saveOverlayCollapsed(payload = {}) {
+  const updated = await saveSettings({ overlay: { collapsed: payload.collapsed === true } });
+  return { saved: true, collapsed: updated.overlay?.collapsed === true };
+}
+
+/**
+ * Cheap pre-solve check the overlay can run before attempting a model call.
+ * Content scripts cannot call permissions.request(), so surface a clear,
+ * actionable message instead of letting the solve fail mid-flight with a
+ * cryptic HOST_PERMISSION_REQUIRED error.
+ */
+async function overlayReadiness() {
+  const settings = await getSettings();
+  const profile = await getProfile(settings.routing?.primaryProfileId || settings.defaultProfileId);
+  if (!profile || !profile.enabled) {
+    return {
+      ready: false,
+      reason: "no-profile",
+      message: "尚未配置可用模型。请打开侧边栏，在“管理模型”中添加并启用一个模型。",
+    };
+  }
+  if (profile.authMode !== "none" && !profile.apiKey) {
+    return {
+      ready: false,
+      reason: "no-key",
+      message: `模型“${profile.name || profile.model}”缺少 API Key，请在侧边栏模型设置中补齐。`,
+    };
+  }
+  const endpointOk = await hasOriginPermission(profile.endpoint);
+  if (!endpointOk) {
+    return {
+      ready: false,
+      reason: "no-permission",
+      message: `尚未授权模型服务 ${new URL(profile.endpoint).origin}。请打开侧边栏模型设置，重新保存该模型以完成授权。`,
+    };
+  }
+  return { ready: true, profile: sanitizeProfile(profile) };
 }
 
 async function sendToContent(tabId, message) {
@@ -646,6 +804,26 @@ async function handleMessage(message, sender) {
       }
       return sendToContent(tab.id, { type: "FILL_ANSWER", payload });
     }
+    case "CWKB_OVERLAY_ACTION":
+      return overlayAction(sender, payload);
+    case "CWKB_OVERLAY_POSITION":
+      return updateOverlayPosition(payload);
+    case "CWKB_OVERLAY_COLLAPSED":
+      return saveOverlayCollapsed(payload);
+    case "CWKB_OVERLAY_READINESS":
+      return overlayReadiness();
+    case "CWKB_OVERLAY_DISABLE":
+      return disableOverlay();
+    case "APPLY_LOW_INTERFERENCE_OVERLAY": {
+      const settings = await getSettings();
+      if (!settings.overlay?.enabled) {
+        await syncOverlayAcrossTabs();
+        return { visible: false };
+      }
+      const tab = await getActiveTab(sender, payload.tabId);
+      validateExtractionTab(tab, payload.expectedOrigin);
+      return showOverlayOnTab(tab, settings, { force: true });
+    }
     case "RUN_BENCHMARK":
       return runBenchmark(payload);
     case "GET_BENCHMARK_STATUS":
@@ -685,6 +863,21 @@ async function handleMessage(message, sender) {
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
+  syncOverlayAcrossTabs().catch(() => undefined);
+});
+
+chrome.runtime.onStartup?.addListener(() => {
+  syncOverlayAcrossTabs().catch(() => undefined);
+});
+
+chrome.tabs.onUpdated?.addListener((_tabId, changeInfo, tab) => {
+  if (changeInfo.status !== "complete") return;
+  syncOverlayToTab(tab).catch(() => undefined);
+});
+
+chrome.storage.onChanged?.addListener((changes, areaName) => {
+  if (areaName !== "local" || !Object.prototype.hasOwnProperty.call(changes || {}, STORAGE_KEY)) return;
+  syncOverlayAcrossTabs().catch(() => undefined);
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

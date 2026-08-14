@@ -1,6 +1,10 @@
 import {
   deleteProfile,
   getPublicSettings,
+  isRequiredOriginPattern,
+  listGrantedOrigins,
+  originPermissionPattern,
+  removeOriginPermission,
   requestOriginPermission,
   saveProfile,
   setDefaultProfile,
@@ -619,6 +623,110 @@ async function removeProfile(profile) {
   }
 }
 
+function displayOrigin(originPattern) {
+  return String(originPattern || "").replace(/\/\*$/, "");
+}
+
+function setGrantStatus(message, variant = "") {
+  const status = $("#originGrantStatus");
+  status.textContent = message;
+  status.className = `origin-grant-status${variant ? ` is-${variant}` : ""}`;
+}
+
+async function renderOriginList() {
+  const list = $("#originList");
+  list.replaceChildren();
+  let origins;
+  try {
+    origins = await listGrantedOrigins();
+  } catch (error) {
+    const failure = document.createElement("p");
+    failure.className = "origin-list-message is-error";
+    failure.textContent = `无法读取授权列表：${error.message}`;
+    list.append(failure);
+    return;
+  }
+  if (!origins.length) {
+    const empty = document.createElement("p");
+    empty.className = "origin-list-message";
+    empty.textContent = "尚无已授权站点。在上方输入网址并点击“添加授权”。";
+    list.append(empty);
+    return;
+  }
+  origins.forEach((origin) => {
+    const item = document.createElement("div");
+    item.className = `origin-item${isRequiredOriginPattern(origin) ? " is-required" : ""}`;
+    const label = document.createElement("code");
+    label.textContent = displayOrigin(origin);
+    const actions = document.createElement("span");
+    actions.className = "origin-item-actions";
+    if (isRequiredOriginPattern(origin)) {
+      const tag = document.createElement("span");
+      tag.className = "origin-tag";
+      tag.textContent = "内置";
+      actions.append(tag);
+    } else {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "移除";
+      remove.addEventListener("click", () => removeOrigin(origin));
+      actions.append(remove);
+    }
+    item.append(label, actions);
+    list.append(item);
+  });
+}
+
+async function grantOrigin(event) {
+  event.preventDefault();
+  const input = $("#originGrantInput");
+  const raw = input.value.trim();
+  if (!raw) {
+    setGrantStatus("请输入要授权的网址。", "error");
+    return;
+  }
+  let origin;
+  try {
+    origin = originPermissionPattern(raw);
+  } catch {
+    setGrantStatus("网址无效：请填写完整的 http(s) 地址，例如 https://example.com。", "error");
+    return;
+  }
+  const button = $("#originGrantButton");
+  setButtonBusy(button, true, "正在授权…");
+  try {
+    // permissions.request() must stay the first asynchronous extension call in
+    // this submit handler so Chrome can tie the prompt to the user gesture.
+    const granted = await requestOriginPermission(raw);
+    if (!granted) {
+      setGrantStatus("未完成授权：请在浏览器弹窗中点击“允许”。", "error");
+      return;
+    }
+    setGrantStatus(`已授权 ${displayOrigin(origin)}。`, "success");
+    input.value = "";
+    await renderOriginList();
+  } catch (error) {
+    setGrantStatus(`授权失败：${error.message}`, "error");
+  } finally {
+    setButtonBusy(button, false);
+  }
+}
+
+async function removeOrigin(origin) {
+  try {
+    const removed = await removeOriginPermission(origin);
+    if (!removed) {
+      showToast("该权限为扩展内置权限，无法移除。", "error");
+      return;
+    }
+    setGrantStatus(`已移除 ${displayOrigin(origin)} 的授权。`);
+    showToast(`已移除 ${displayOrigin(origin)} 的授权。`);
+    await renderOriginList();
+  } catch (error) {
+    showToast(`移除失败：${error.message}`, "error");
+  }
+}
+
 function maybeUpdateEndpointForProtocolChange() {
   const endpoint = $("#profileEndpoint");
   const newDefault = DEFAULT_ENDPOINTS[$("#profileProtocol").value];
@@ -630,6 +738,7 @@ function maybeUpdateEndpointForProtocolChange() {
 function bindEvents() {
   $("#newProfileButton").addEventListener("click", setFormForNewProfile);
   $("#profileForm").addEventListener("submit", saveCurrentProfile);
+  $("#originGrantForm").addEventListener("submit", grantOrigin);
   $("#testProfileButton").addEventListener("click", testCurrentProfile);
   $("#refreshModelsButton").addEventListener("click", refreshModelCatalog);
   $("#profileProtocol").addEventListener("change", maybeUpdateEndpointForProtocolChange);
@@ -666,6 +775,7 @@ async function init() {
     state.defaultProfileId = profileId(settings?.defaultProfileId);
     setFormForNewProfile();
     renderProfileList();
+    await renderOriginList();
     state.unsubscribeSettings = subscribeToSettings((updatedSettings) => {
       applyStoredProfiles(updatedSettings);
     });

@@ -135,6 +135,22 @@
         </section>
       </div>
 
+      <section class="permissions-section" aria-labelledby="permissionsHeading">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">SITE ACCESS</p>
+            <h2 id="permissionsHeading">站点授权</h2>
+          </div>
+        </div>
+        <p class="permissions-intro">手动授权后，插件可以直接读取该站点或调用其接口，无需在每次操作时重新确认。适用于问卷站点、自建模型服务或检索服务。</p>
+        <form id="originGrantForm" class="origin-grant-form" novalidate>
+          <input id="originGrantInput" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://example.com 或 http://192.168.1.10:8787" aria-label="要授权的网址" />
+          <button id="originGrantButton" class="button button-secondary" type="submit">添加授权</button>
+        </form>
+        <p id="originGrantStatus" class="origin-grant-status" role="status" aria-live="polite"></p>
+        <div id="originList" class="origin-list" aria-live="polite"></div>
+      </section>
+
       <section class="security-note">
         <span class="security-icon" aria-hidden="true">⌘</span>
         <div>
