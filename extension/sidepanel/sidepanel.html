@@ -233,6 +233,14 @@
               <input id="overlayClickThrough" type="checkbox" />
               <span>内容区点击穿透（顶部仍可拖动、折叠和关闭）</span>
             </label>
+            <label class="inline-toggle">
+              <input id="overlayStealth" type="checkbox" />
+              <span>低调模式 — 浮窗自动隐藏，鼠标靠近或 Alt / ⌥ + Shift + X 唤醒</span>
+            </label>
+            <label class="field range-field">
+              <span>低调透明度 <output id="overlayStealthOpacityValue" for="overlayStealthOpacity">8%</output></span>
+              <input id="overlayStealthOpacity" type="range" min="1" max="30" step="1" value="8" />
+            </label>
             <button id="overlayApplyButton" class="button button-secondary button-wide overlay-apply-button" type="button">在当前页面显示或更新</button>
             <p id="overlayStatus" class="settings-help overlay-status" aria-live="polite"></p>
           </fieldset>

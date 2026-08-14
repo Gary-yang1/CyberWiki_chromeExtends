@@ -234,15 +234,31 @@ function renderProfileSelects(selected = {}) {
     : "尚未配置模型";
 }
 
+function overlayFormSnapshot(overlay) {
+  // Only fields rendered in the settings form. Overlay writes that merely
+  // persist collapsed/position (e.g. clicking the dot) must not re-render
+  // the form, or in-progress slider edits get stomped.
+  return JSON.stringify([
+    overlay.enabled === true,
+    overlay.stealth === true,
+    overlay.stealthOpacity,
+    overlay.opacity,
+    overlay.clickThrough === true,
+  ]);
+}
+
 function applyStoredSettings(settings, { preserveSelections = true } = {}) {
   const selected = preserveSelections ? selectedProfileValues() : {};
+  const previousOverlayForm = overlayFormSnapshot(normalizedOverlaySettings());
   state.settings = settings || {};
   state.profiles = asArray(settings?.profiles);
   state.defaultProfileId = profileId(settings?.defaultProfileId)
     || state.profiles.find((profile) => profile.enabled !== false)?.id
     || null;
   renderProfileSelects(selected);
-  applyOverlaySettingsToForm();
+  if (overlayFormSnapshot(normalizedOverlaySettings()) !== previousOverlayForm) {
+    applyOverlaySettingsToForm();
+  }
   setConnectionState(state.profiles.length ? "ready" : "error", state.profiles.length ? "模型已就绪" : "未配置模型");
 }
 
@@ -250,6 +266,8 @@ function normalizedOverlaySettings() {
   const overlay = state.settings.overlay || {};
   return {
     enabled: overlay.enabled === true,
+    stealth: overlay.stealth === true,
+    stealthOpacity: Math.min(Math.max(Number(overlay.stealthOpacity) || 0.08, 0.01), 0.3),
     opacity: Math.min(Math.max(Number(overlay.opacity) || 0.68, 0.3), 1),
     clickThrough: overlay.clickThrough === true,
     collapsed: overlay.collapsed !== false,
@@ -265,7 +283,10 @@ function applyOverlaySettingsToForm() {
   $("#overlayEnabled").checked = overlay.enabled;
   $("#overlayOpacity").value = String(Math.round(overlay.opacity * 100));
   $("#overlayClickThrough").checked = overlay.clickThrough;
+  $("#overlayStealth").checked = overlay.stealth;
+  $("#overlayStealthOpacity").value = String(Math.round(overlay.stealthOpacity * 100));
   $("#overlayOpacityValue").value = `${Math.round(overlay.opacity * 100)}%`;
+  $("#overlayStealthOpacityValue").value = `${Math.round(overlay.stealthOpacity * 100)}%`;
 }
 
 function applySettingsToForm() {
@@ -286,6 +307,8 @@ function overlaySettingsFromForm() {
   return {
     ...previous,
     enabled: $("#overlayEnabled").checked,
+    stealth: $("#overlayStealth").checked,
+    stealthOpacity: Math.min(Math.max(Number($("#overlayStealthOpacity").value) / 100, 0.01), 0.3),
     opacity: Math.min(Math.max(Number($("#overlayOpacity").value) / 100, 0.3), 1),
     clickThrough: $("#overlayClickThrough").checked,
   };
@@ -322,7 +345,9 @@ async function applyOverlayToCurrentPage() {
     });
     setOverlayStatus(
       result?.visible
-        ? "浮窗已显示。展开后点“收起”可恢复小白点，悬停不会改变透明度。"
+        ? overlay.stealth
+          ? "低调模式已开启。浮窗自动隐藏，鼠标靠近或 Alt / ⌥ + Shift + X 唤醒。"
+          : "浮窗已显示。展开后点“收起”可恢复小白点，悬停不会改变透明度。"
         : "低干扰浮窗模式已关闭。",
       "success",
     );
@@ -752,6 +777,9 @@ async function saveRouting(event) {
       collection: $("#ragCollection").value.trim(),
       topK: Number($("#ragTopK").value) || 3,
     },
+    // The overlay fieldset lives in this same form; persist what it shows so
+    // the post-save refresh does not revert unsaved overlay edits.
+    overlay: overlaySettingsFromForm(),
   };
   const button = event.currentTarget.querySelector("button[type=submit]");
   setButtonBusy(button, true, "正在保存…");

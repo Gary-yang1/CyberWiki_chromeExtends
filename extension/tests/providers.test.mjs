@@ -8,6 +8,7 @@ import {
   testProfileConnection,
   validateModelProfile,
 } from "../src/providers/index.js";
+import { getProfileEndpoint } from "../src/shared/model-profile.js";
 
 function jsonResponse(payload, status = 200, headers = {}) {
   return {
@@ -95,6 +96,20 @@ test("validates an absolute endpoint and rejects reserved custom headers", () =>
   });
   assert.equal(invalid.valid, false);
   assert.match(invalid.errors.join("\n"), /reserved header/i);
+});
+
+test("completes base-style endpoints so chat calls and the model catalog stay aligned", () => {
+  const openai = (endpoint) => getProfileEndpoint({ endpoint, protocol: "openai_chat_completions" });
+  assert.equal(openai("https://api.deepseek.com/v1"), "https://api.deepseek.com/v1/chat/completions");
+  assert.equal(openai("https://api.deepseek.com"), "https://api.deepseek.com/v1/chat/completions");
+  assert.equal(openai("http://127.0.0.1:11434/v1/"), "http://127.0.0.1:11434/v1/chat/completions");
+  // Full endpoints and custom gateway paths must stay verbatim.
+  assert.equal(openai("https://api.openai.com/v1/chat/completions"), "https://api.openai.com/v1/chat/completions");
+  assert.equal(openai("https://gateway.example/custom/llm"), "https://gateway.example/custom/llm");
+
+  const anthropic = (endpoint) => getProfileEndpoint({ endpoint, protocol: "anthropic_messages" });
+  assert.equal(anthropic("https://api.anthropic.com"), "https://api.anthropic.com/v1/messages");
+  assert.equal(anthropic("https://api.anthropic.com/v1/messages"), "https://api.anthropic.com/v1/messages");
 });
 
 test("sends an OpenAI-compatible Chat Completions request and normalizes an answer", async () => {

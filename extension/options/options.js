@@ -45,8 +45,8 @@ function protocolLabel(protocol) {
 
 function endpointHint(protocol) {
   return protocol === "anthropic_messages"
-    ? "Anthropic 使用 /v1/messages，认证头会自动使用 x-api-key。"
-    : "使用 Chat Completions 兼容接口，认证头会自动使用 Bearer Token。";
+    ? "可填完整地址（…/v1/messages）或以 /v1 结尾的 Base 地址，认证头自动使用 x-api-key。"
+    : "可填完整地址（…/v1/chat/completions）或以 /v1 结尾的 Base 地址，认证头自动使用 Bearer Token。";
 }
 
 function showToast(message, variant = "default") {
@@ -258,12 +258,12 @@ function validateCatalogProfile(profile) {
 function catalogPermissionProfile(profile) {
   const stored = state.profiles.find((item) => item.id === (state.editingId || profile.id));
   if (!stored) return profile;
+  // The form profile always carries modelsEndpoint (empty = derive), so the
+  // stored value never leaks into the merge and no endpoint-change reset is
+  // needed — a user-typed catalog URL survives endpoint edits.
   return {
     ...stored,
     ...profile,
-    // A custom catalog endpoint belongs to the saved request endpoint. If the
-    // user changes that endpoint, derive a fresh /models URL instead.
-    ...(stored.endpoint !== profile.endpoint ? { modelsEndpoint: "" } : {}),
   };
 }
 
@@ -454,6 +454,7 @@ function startEditing(id) {
   $("#profileAuthMode").value = profile.authMode || "api_key";
   $("#profileModel").value = profile.model || "";
   $("#profileEndpoint").value = profile.endpoint || profile.url || DEFAULT_ENDPOINTS[profile.protocol] || "";
+  $("#profileModelsEndpoint").value = profile.modelsEndpoint || "";
   $("#profileApiKey").value = "";
   $("#profileApiKey").type = "password";
   $("#toggleKeyButton").textContent = "显示";
@@ -502,6 +503,7 @@ function currentFormProfile() {
     protocol: $("#profileProtocol").value,
     authMode: $("#profileAuthMode").value,
     endpoint: $("#profileEndpoint").value.trim(),
+    modelsEndpoint: $("#profileModelsEndpoint").value.trim(),
     model: $("#profileModel").value.trim(),
     timeoutMs: Number($("#profileTimeout").value),
     maxOutputTokens: Number($("#profileMaxTokens").value),
@@ -747,6 +749,7 @@ function bindEvents() {
     markModelCatalogStale();
   });
   $("#profileEndpoint").addEventListener("input", markModelCatalogStale);
+  $("#profileModelsEndpoint").addEventListener("input", markModelCatalogStale);
   $("#profileApiKey").addEventListener("input", markModelCatalogStale);
   $("#modelCatalogSearch").addEventListener("input", renderModelCatalog);
   $("#showAllModels").addEventListener("change", renderModelCatalog);

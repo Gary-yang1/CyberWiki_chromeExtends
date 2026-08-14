@@ -130,6 +130,27 @@ export function getDefaultEndpoint(protocol) {
 }
 
 /**
+ * Complete the request path for endpoints supplied as a base URL. Providers
+ * usually document base addresses such as https://api.deepseek.com/v1; calling
+ * that verbatim 404s while the derived GET /models works, so the catalog would
+ * succeed while every chat call fails. Bare origins get the protocol's default
+ * path; versioned bases get the chat suffix appended. Any other custom path is
+ * kept verbatim to stay compatible with gateways that expose their own routes.
+ */
+export function completeCallPath(url, protocol) {
+  const suffix = protocol === MODEL_PROTOCOLS.ANTHROPIC_MESSAGES
+    ? "/messages"
+    : "/chat/completions";
+  const pathname = url.pathname.replace(/\/+$/, "");
+  if (!pathname) {
+    url.pathname = getDefaultEndpoint(protocol);
+  } else if (!new RegExp(`${suffix}$`, "i").test(pathname) && /\/v\d+$/.test(pathname)) {
+    url.pathname = `${pathname}${suffix}`;
+  }
+  return url.toString();
+}
+
+/**
  * Build a safe HTTP(S) endpoint. It intentionally accepts a complete endpoint
  * string because that is the simplest form for local OpenAI-compatible hosts.
  */
@@ -138,7 +159,7 @@ export function getProfileEndpoint(profile) {
   const endpoint = normalized.endpoint || getDefaultEndpoint(normalized.protocol);
 
   if (isAbsoluteUrl(endpoint)) {
-    return new URL(endpoint).toString();
+    return completeCallPath(new URL(endpoint), normalized.protocol);
   }
 
   const base = parseHttpUrl(normalized.baseUrl);

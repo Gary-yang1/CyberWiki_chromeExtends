@@ -193,6 +193,31 @@ test("lists granted origins and treats manifest-required patterns as fixed", asy
   ]);
 });
 
+test("stealth overlay defaults to false and can be enabled", async () => {
+  resetSettings();
+  const saved = await saveSettings({
+    overlay: { enabled: true, stealth: true },
+  });
+  assert.equal(saved.overlay.stealth, true);
+  assert.equal(saved.overlay.stealthOpacity, 0.08);
+
+  const saved2 = await saveSettings({
+    overlay: { enabled: true, stealth: "yes" },
+  });
+  assert.equal(saved2.overlay.stealth, false);
+
+  // stealthOpacity is clamped to [0.01, 0.3]
+  const saved3 = await saveSettings({
+    overlay: { enabled: true, stealth: true, stealthOpacity: 0.5 },
+  });
+  assert.equal(saved3.overlay.stealthOpacity, 0.3);
+
+  const saved4 = await saveSettings({
+    overlay: { enabled: true, stealth: true, stealthOpacity: 0.001 },
+  });
+  assert.equal(saved4.overlay.stealthOpacity, 0.01);
+});
+
 test("normalizes and persists low-interference overlay preferences", async () => {
   resetSettings();
   const saved = await saveSettings({
@@ -207,6 +232,8 @@ test("normalizes and persists low-interference overlay preferences", async () =>
 
   assert.deepEqual(saved.overlay, {
     enabled: true,
+    stealth: false,
+    stealthOpacity: 0.08,
     opacity: 0.3,
     clickThrough: true,
     collapsed: false,

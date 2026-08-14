@@ -1,7 +1,9 @@
 import {
   MODEL_PROTOCOLS,
   buildProviderHeaders,
+  completeCallPath,
   normalizeModelProfile,
+  resolveApiKey,
 } from "../shared/model-profile.js";
 import { ProviderError } from "../shared/provider-error.js";
 import { fetchWithTimeout } from "../shared/fetch-timeout.js";
@@ -43,13 +45,17 @@ export function deriveModelsEndpoint(rawProfile = {}, options = {}) {
     throw catalogUnsupported(profile);
   }
 
-  const requestEndpoint = asHttpUrl(profile.endpoint || options.endpoint);
-  if (!requestEndpoint) {
+  const suppliedEndpoint = asHttpUrl(profile.endpoint || options.endpoint);
+  if (!suppliedEndpoint) {
     throw new ProviderError("请先填写有效的 Chat Completions Endpoint。", {
       code: "invalid_profile",
       protocol: profile.protocol,
     });
   }
+  // Derive from the completed call path so a base-style endpoint (e.g.
+  // https://host or https://host/v1) yields the same versioned base as the
+  // actual chat request instead of a root-level /models.
+  const requestEndpoint = new URL(completeCallPath(suppliedEndpoint, profile.protocol));
 
   const configured = String(rawProfile?.modelsEndpoint || options.modelsEndpoint || "").trim();
   if (configured) {
@@ -82,13 +88,25 @@ export function deriveModelsEndpoint(rawProfile = {}, options = {}) {
   return modelsEndpoint.toString();
 }
 
-/** Build headers for a GET /models request using the profile's existing auth. */
+/**
+ * Build headers for a GET /models request using the profile's existing auth.
+ * Model discovery frequently crosses protocol styles on the same host — e.g.
+ * an Anthropic-compatible gateway (DeepSeek) that only lists models on the
+ * OpenAI-style /v1/models — so send both header styles when a key exists;
+ * servers ignore the style they do not recognize.
+ */
 export function buildModelsRequestHeaders(rawProfile = {}, options = {}) {
   const profile = normalizeModelProfile(rawProfile);
   if (!CATALOG_PROTOCOLS.has(profile.protocol)) {
     throw catalogUnsupported(profile);
   }
-  return buildProviderHeaders(profile, options);
+  const headers = buildProviderHeaders(profile, options);
+  const apiKey = resolveApiKey(profile, options);
+  if (apiKey && profile.authMode !== "none") {
+    headers.authorization ??= `Bearer ${apiKey}`;
+    headers["x-api-key"] ??= apiKey;
+  }
+  return headers;
 }
 
 function asModelRecord(value) {
@@ -199,12 +217,31 @@ function catalogSource(endpoint, protocol) {
 }
 
 /**
+ * Ordered candidate URLs for model discovery. An explicitly configured
+ * modelsEndpoint is authoritative and never falls back; a derived endpoint
+ * may be missing on gateways that host the catalog on a different path
+ * (e.g. DeepSeek's Anthropic layer serves calls at /anthropic/v1/messages
+ * but only lists models on the OpenAI-style /v1/models), so same-origin
+ * fallbacks are appended for automatic discovery.
+ */
+export function modelsEndpointCandidates(rawProfile = {}, options = {}) {
+  const primary = deriveModelsEndpoint(rawProfile, options);
+  const explicit = String(rawProfile?.modelsEndpoint || options.modelsEndpoint || "").trim();
+  if (explicit) return [primary];
+  const { origin } = new URL(primary);
+  const candidates = [primary];
+  for (const fallback of [`${origin}/v1/models`, `${origin}/models`]) {
+    if (!candidates.includes(fallback)) candidates.push(fallback);
+  }
+  return candidates;
+}
+
+/**
  * Fetch models available to this profile. The returned data intentionally
  * excludes the profile and every credential; it is safe to forward to UI.
  */
 export async function listProviderModels(rawProfile = {}, options = {}) {
   const profile = normalizeModelProfile(rawProfile);
-  const modelsEndpoint = deriveModelsEndpoint(rawProfile, options);
   const headers = buildModelsRequestHeaders(rawProfile, options);
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   if (typeof fetchImpl !== "function") {
@@ -214,53 +251,72 @@ export async function listProviderModels(rawProfile = {}, options = {}) {
     });
   }
 
-  let response;
-  let latencyMs;
-  try {
-    const outcome = await fetchWithTimeout(modelsEndpoint, {
-      method: "GET",
-      headers,
-    }, {
-      timeoutMs: normalizeTimeout(options.timeoutMs || profile.timeoutMs),
-      signal: options.signal,
-      fetchImpl,
-    });
-    response = outcome.value;
-    latencyMs = outcome.latencyMs;
-  } catch (error) {
-    if (error instanceof ProviderError) {
-      error.protocol ||= profile.protocol;
-      throw error;
+  async function fetchCatalog(modelsEndpoint) {
+    let response;
+    let latencyMs;
+    try {
+      const outcome = await fetchWithTimeout(modelsEndpoint, {
+        method: "GET",
+        headers,
+      }, {
+        timeoutMs: normalizeTimeout(options.timeoutMs || profile.timeoutMs),
+        signal: options.signal,
+        fetchImpl,
+      });
+      response = outcome.value;
+      latencyMs = outcome.latencyMs;
+    } catch (error) {
+      if (error instanceof ProviderError) {
+        error.protocol ||= profile.protocol;
+        throw error;
+      }
+      throw new ProviderError("无法连接模型列表服务。", {
+        code: "network_error",
+        protocol: profile.protocol,
+        retryable: true,
+        cause: error,
+      });
     }
-    throw new ProviderError("无法连接模型列表服务。", {
-      code: "network_error",
-      protocol: profile.protocol,
-      retryable: true,
-      cause: error,
-    });
-  }
 
-  const status = Number.isInteger(response?.status) ? response.status : 0;
-  const requestId = responseRequestId(response?.headers);
-  const payload = await readJson(response);
-  if (!isOk(response)) {
-    throw new ProviderError(errorMessage(payload, status), {
-      code: "model_catalog_http_error",
-      status,
-      protocol: profile.protocol,
+    const status = Number.isInteger(response?.status) ? response.status : 0;
+    const requestId = responseRequestId(response?.headers);
+    const payload = await readJson(response);
+    if (!isOk(response)) {
+      throw new ProviderError(errorMessage(payload, status), {
+        code: "model_catalog_http_error",
+        status,
+        protocol: profile.protocol,
+        requestId,
+        retryable: status === 408 || status === 429 || status >= 500,
+        details: { errorType: payload?.error?.type || payload?.error?.code },
+      });
+    }
+
+    const catalog = normalizeModelCatalog(payload);
+    return {
+      ...catalog,
+      fetchedAt: new Date().toISOString(),
+      modelsEndpoint,
+      source: catalogSource(modelsEndpoint, profile.protocol),
       requestId,
-      retryable: status === 408 || status === 429 || status >= 500,
-      details: { errorType: payload?.error?.type || payload?.error?.code },
-    });
+      latencyMs,
+    };
   }
 
-  const catalog = normalizeModelCatalog(payload);
-  return {
-    ...catalog,
-    fetchedAt: new Date().toISOString(),
-    modelsEndpoint,
-    source: catalogSource(modelsEndpoint, profile.protocol),
-    requestId,
-    latencyMs,
-  };
+  let lastError;
+  for (const candidate of modelsEndpointCandidates(rawProfile, options)) {
+    try {
+      return await fetchCatalog(candidate);
+    } catch (error) {
+      // Only "path does not exist" justifies trying the next candidate.
+      // Auth failures, rate limits and server errors must surface as-is.
+      if (!(error instanceof ProviderError)
+        || error.code !== "model_catalog_http_error"
+        || (error.status !== 404 && error.status !== 405)) {
+        throw error;
+      }
+      lastError = error;
+    }
+  }
+  throw lastError;
 }

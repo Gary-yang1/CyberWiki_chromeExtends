@@ -23,6 +23,8 @@ export const DEFAULT_RAG_SETTINGS = {
 
 export const DEFAULT_OVERLAY_SETTINGS = {
   enabled: false,
+  stealth: false,
+  stealthOpacity: 0.08,
   opacity: 0.68,
   clickThrough: false,
   collapsed: true,
@@ -78,6 +80,8 @@ export function normalizeOverlaySettings(value = {}) {
     ...DEFAULT_OVERLAY_SETTINGS,
     ...source,
     enabled: source.enabled === true,
+    stealth: source.stealth === true,
+    stealthOpacity: clampNumber(source.stealthOpacity, DEFAULT_OVERLAY_SETTINGS.stealthOpacity, 0.01, 0.3),
     opacity: clampNumber(source.opacity, DEFAULT_OVERLAY_SETTINGS.opacity, 0.3, 1),
     clickThrough: source.clickThrough === true,
     collapsed: source.collapsed !== false,

@@ -104,6 +104,8 @@ function publicOverlayConfig(settings) {
   const overlay = settings?.overlay || {};
   return {
     enabled: overlay.enabled === true,
+    stealth: overlay.stealth === true,
+    stealthOpacity: Number(overlay.stealthOpacity) || 0.08,
     opacity: Number(overlay.opacity) || 0.68,
     clickThrough: overlay.clickThrough === true,
     collapsed: overlay.collapsed !== false,
@@ -172,10 +174,11 @@ async function overlayAction(sender, payload = {}) {
   }
   if (action === "solve") {
     const extracted = await extractCurrentQuestion(sender, { questionId: payload.questionId });
-    return solveQuestion({
+    const solved = await solveQuestion({
       question: extracted.question,
       mode: payload.mode,
     }, sender);
+    return { ...solved, count: extracted.count, questions: extracted.questions };
   }
   if (action === "fill") {
     return sendToContent(tab.id, {

@@ -17,12 +17,20 @@
     panel: null,
     config: null,
     question: null,
+    questions: [],
     result: null,
     busy: false,
     collapsed: true,
     drag: null,
     suppressHeaderClick: false,
     userHidden: false,
+    // Stealth mode: overlay auto-hides when mouse is far away.
+    stealth: false,
+    stealthVisible: false,
+    stealthTimer: null,
+    stealthProximity: 80,  // px radius to detect mouse proximity
+    stealthAutoHideMs: 2000, // ms before auto-hiding after mouse leaves
+    stealthPinned: false,  // pinned open via keyboard shortcut
   };
 
   Object.defineProperty(globalThis, GLOBAL_KEY, {
@@ -37,6 +45,8 @@
   function normalizeConfig(value = {}) {
     return {
       enabled: value.enabled === true,
+      stealth: value.stealth === true,
+      stealthOpacity: clamp(value.stealthOpacity ?? 0.08, 0.01, 0.3),
       opacity: clamp(value.opacity || 0.68, 0.3, 1),
       clickThrough: value.clickThrough === true,
       collapsed: value.collapsed !== false,
@@ -188,9 +198,7 @@
         background: rgba(255, 255, 255, .94);
       }
       .brand-copy { min-width: 0; flex: 1; }
-      .brand-copy strong, .brand-copy small { display: block; }
-      .brand-copy strong { font-size: 12px; font-weight: 720; line-height: 1.2; letter-spacing: -.01em; }
-      .brand-copy small { margin-top: 2px; color: #6b7671; font-size: 10px; }
+      .brand-copy strong { display: block; font-size: 12px; font-weight: 720; line-height: 1.2; letter-spacing: -.01em; }
       .header-actions { display: inline-flex; gap: 4px; }
       .icon-button {
         display: grid;
@@ -216,31 +224,33 @@
         outline: 2px solid rgba(20, 118, 83, .4);
         outline-offset: 2px;
       }
-      .body { padding: 12px; user-select: text; }
-      .mode-note {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        margin-bottom: 10px;
-        color: #68736e;
-        font-size: 10px;
+      .body { padding: 10px; user-select: text; }
+      .picker { margin-bottom: 8px; }
+      .picker select {
+        width: 100%;
+        height: 30px;
+        border: 1px solid rgba(35, 52, 44, .16);
+        border-radius: 9px;
+        background: rgba(255, 255, 255, .8);
+        color: #25312c;
+        font-size: 11px;
+        font-weight: 650;
+        padding: 0 8px;
       }
-      .mode-name { color: #3d4a44; font-weight: 700; }
       .question {
-        max-height: 144px;
+        max-height: 92px;
         overflow: auto;
         margin: 0;
-        padding: 11px 12px;
+        padding: 9px 10px;
         border: 1px solid rgba(35, 52, 44, .12);
-        border-radius: 12px;
+        border-radius: 10px;
         background: rgba(255, 255, 255, .74);
         color: #25312c;
         white-space: pre-wrap;
         overflow-wrap: anywhere;
         font-size: 11px;
         font-weight: 650;
-        line-height: 1.55;
+        line-height: 1.5;
       }
       .question.is-empty { color: #79867f; font-weight: 500; }
       .result {
@@ -248,39 +258,34 @@
         align-items: center;
         justify-content: space-between;
         gap: 10px;
-        min-height: 48px;
-        margin-top: 9px;
-        padding: 10px 12px;
-        border-radius: 12px;
+        min-height: 44px;
+        margin-top: 8px;
+        padding: 9px 11px;
+        border-radius: 10px;
         background: #213129;
         color: #f6faf8;
       }
-      .result-copy span, .result-copy strong { display: block; }
-      .result-copy span { color: #b8c6bf; font-size: 10px; }
-      .result-copy strong { margin-top: 1px; font-size: 23px; line-height: 1.1; letter-spacing: -.03em; }
-      .result-meta { max-width: 128px; color: #c8d6cf; text-align: right; font-size: 11px; }
-      .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 10px; }
+      .result strong { font-size: 22px; line-height: 1.1; letter-spacing: -.03em; }
+      .result-meta { max-width: 128px; color: #c8d6cf; text-align: right; font-size: 10px; }
+      .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 9px; }
       .button {
-        min-height: 36px;
-        border: 1px solid rgba(32, 51, 42, .14);
-        border-radius: 10px;
-        background: rgba(255, 255, 255, .82);
+        min-height: 34px;
+        border: 1px solid rgba(32, 51, 42, .18);
+        border-radius: 9px;
+        background: rgba(255, 255, 255, .85);
         color: #26332d;
         font-size: 11px;
-        font-weight: 720;
+        font-weight: 700;
         cursor: pointer;
       }
-      .button:hover:not(:disabled) { border-color: rgba(20, 118, 83, .42); background: #fff; }
-      .button.primary { border-color: #147653; background: #147653; color: #fff; }
-      .button.primary:hover:not(:disabled) { background: #0e5d41; }
+      .button:hover:not(:disabled) { border-color: rgba(32, 51, 42, .45); background: #fff; }
       .button:disabled { cursor: wait; opacity: .48; }
       .status {
-        min-height: 16px;
-        margin: 8px 1px 0;
-        padding: 5px 8px;
-        border-radius: 8px;
+        min-height: 14px;
+        margin: 7px 1px 0;
+        padding: 3px 6px;
         color: #58635e;
-        font-size: 11px;
+        font-size: 10px;
         line-height: 1.45;
       }
       .status.is-error {
@@ -296,6 +301,21 @@
         .panel.is-collapsed:hover { transform: none; }
         .panel.is-collapsed:hover .mark { transform: none; }
       }
+      /* Stealth mode: fade indicator */
+      .stealth-indicator {
+        position: absolute;
+        top: -6px;
+        right: -6px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: rgba(255, 200, 0, .85);
+        box-shadow: 0 0 4px rgba(255, 200, 0, .5);
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 200ms ease;
+      }
+      .stealth-indicator.is-active { opacity: 1; }
     `;
   }
 
@@ -327,31 +347,36 @@
         <span class="mark" aria-hidden="true"></span>
         <span class="brand-copy">
           <strong>题目助手</strong>
-          <small>低干扰模式，不会自动提交</small>
         </span>
         <span class="header-actions">
-          <button class="icon-button collapse-button" data-action="collapse" type="button" title="收起为小白点" aria-label="收起为小白点">收起</button>
+          <button class="icon-button collapse-button" data-action="collapse" type="button" title="收起为小白点" aria-label="收起为小白点">—</button>
           <button class="icon-button" data-action="close" type="button" title="关闭浮窗模式" aria-label="关闭浮窗模式">×</button>
         </span>
       </header>
       <div class="body">
-        <div class="mode-note">
-          <span class="mode-name">当前题目</span>
-          <span data-role="interaction-mode">可正常操作</span>
+        <div class="picker" data-role="picker" hidden>
+          <select data-role="question-select" aria-label="选择题号"></select>
         </div>
-        <p class="question is-empty" data-role="question">点击“提取”识别当前题目。</p>
+        <p class="question is-empty" data-role="question">点「提取」识别当前题目</p>
         <div class="result" data-role="result" hidden>
-          <span class="result-copy"><span>建议答案</span><strong data-role="answer">-</strong></span>
+          <strong data-role="answer">-</strong>
           <span class="result-meta" data-role="result-meta"></span>
         </div>
         <div class="actions">
           <button class="button" data-action="extract" type="button">提取</button>
-          <button class="button primary" data-action="solve" type="button">解答</button>
+          <button class="button" data-action="solve" type="button">解答</button>
           <button class="button" data-action="fill" type="button" disabled>填入</button>
         </div>
-        <p class="status" data-role="status" aria-live="polite">点击“解答”会先识别当前题目。</p>
+        <p class="status" data-role="status" aria-live="polite"></p>
       </div>
     `;
+
+    // Stealth indicator — tiny yellow dot shown when stealth mode is active
+    const indicator = document.createElement("span");
+    indicator.className = "stealth-indicator";
+    indicator.setAttribute("aria-hidden", "true");
+    panel.style.position = "relative";
+    panel.append(indicator);
 
     shadow.append(style, panel);
     (document.documentElement || document.body).append(host);
@@ -359,6 +384,7 @@
     state.shadow = shadow;
     state.panel = panel;
     bindEvents();
+    bindStealthEvents();
     return host;
   }
 
@@ -395,6 +421,46 @@
 
   function questionFromResponse(response) {
     return response?.question || response?.extractedQuestion || null;
+  }
+
+  function questionTypeShort(question) {
+    if (question?.type === "multiple_choice") return "多选";
+    if (question?.type === "true_false") return "判断";
+    if (question?.type === "choice_unknown") return "选择";
+    return "单选";
+  }
+
+  function absorbQuestions(response) {
+    const questions = Array.isArray(response?.questions) ? response.questions : [];
+    if (!questions.length) return;
+    state.questions = questions;
+    renderQuestionPicker();
+  }
+
+  /** Show the question picker only when the page actually has several questions. */
+  function renderQuestionPicker() {
+    const picker = role("picker");
+    const select = role("question-select");
+    if (!picker || !select) return;
+    if (state.questions.length < 2) {
+      picker.hidden = true;
+      return;
+    }
+    picker.hidden = false;
+    select.replaceChildren(...state.questions.map((question, index) => {
+      const option = document.createElement("option");
+      option.value = String(index);
+      option.textContent = `第 ${index + 1} 题 · ${questionTypeShort(question)}`;
+      return option;
+    }));
+    const selected = state.questions.findIndex((question) => question.id === state.question?.id);
+    select.value = String(selected >= 0 ? selected : 0);
+  }
+
+  function selectQuestionByIndex(index) {
+    const question = state.questions[index];
+    if (!question || question.id === state.question?.id) return;
+    renderQuestion(question);
   }
 
   function renderQuestion(question) {
@@ -446,13 +512,16 @@
 
   async function runAction(name) {
     if (state.busy) return;
+    // In stealth mode, show the overlay during the action
+    if (state.stealth) setStealthVisible(true);
     setBusy(true, name);
     setStatus(name === "solve" ? "正在调用已配置的模型…" : "正在处理当前页面…");
     try {
       if (name === "extract") {
         const response = await runtimeMessage("CWKB_OVERLAY_ACTION", { action: "extract" });
+        absorbQuestions(response);
         renderQuestion(questionFromResponse(response));
-        setStatus(`已识别 ${Number(response?.count) || 1} 道题目。`);
+        setStatus(`识别到 ${state.questions.length || 1} 题。`);
       } else if (name === "solve") {
         // Content scripts cannot request host permissions, so check readiness
         // up front and surface a clear, actionable message instead of failing
@@ -468,8 +537,9 @@
         });
         const question = questionFromResponse(response);
         if (question) renderQuestion(question);
+        absorbQuestions(response);
         renderResult(response);
-        setStatus("答案仅供核对，不会自动提交。");
+        setStatus("答案仅供核对。");
       } else if (name === "fill") {
         const answer = state.result?.answer ?? state.result?.parsedAnswer;
         const response = await runtimeMessage("CWKB_OVERLAY_ACTION", {
@@ -477,12 +547,14 @@
           questionId: state.question?.id,
           answer,
         });
-        setStatus(response?.filled === false ? "未能确认选项状态，请检查页面。" : "答案已填入，尚未提交。", response?.filled === false);
+        setStatus(response?.filled === false ? "未能确认填入状态。" : "已填入，未提交。", response?.filled === false);
       }
     } catch (error) {
       setStatus(error?.message || "浮窗操作失败。", true);
     } finally {
       setBusy(false);
+      // In stealth mode, schedule auto-hide after action completes
+      if (state.stealth && state.stealthVisible) scheduleStealthHide();
     }
   }
 
@@ -505,11 +577,17 @@
     }
     const button = action("collapse");
     if (button) {
-      button.textContent = "收起";
       button.setAttribute("aria-label", "收起为小白点");
       button.setAttribute("aria-expanded", String(!state.collapsed));
     }
     state.panel?.setAttribute("aria-expanded", String(!state.collapsed));
+    // Stealth semantics: an expanded panel is "in use" — pin it visible so a
+    // stray mousemove cannot fade it out mid-interaction; collapsing the dot
+    // returns to the low-opacity stealth state immediately.
+    if (state.stealth) {
+      if (state.collapsed) setStealthVisible(false);
+      else setStealthVisible(true, { pin: true });
+    }
     clampToViewport();
     if (persist) {
       runtimeMessage("CWKB_OVERLAY_COLLAPSED", { collapsed: state.collapsed }).catch(() => undefined);
@@ -603,7 +681,6 @@
   function activateCollapsedHandle() {
     if (!state.collapsed) return;
     setCollapsed(false, { persist: true });
-    setStatus("浮窗已展开，可提取当前题目或直接解答。");
   }
 
   function handleHeaderClick(event) {
@@ -635,6 +712,9 @@
     for (const name of ["extract", "solve", "fill"]) {
       action(name)?.addEventListener("click", () => runAction(name));
     }
+    role("question-select")?.addEventListener("change", (event) => {
+      selectQuestionByIndex(Number(event.target.value));
+    });
     const handle = state.shadow.querySelector("[data-drag-handle]");
     handle?.addEventListener("click", handleHeaderClick);
     handle?.addEventListener("keydown", handleHeaderKeydown);
@@ -643,6 +723,105 @@
     handle?.addEventListener("pointerup", endDrag);
     handle?.addEventListener("pointercancel", endDrag);
     window.addEventListener("resize", clampToViewport);
+  }
+
+  // ─── Stealth mode: proximity detection + keyboard shortcut ────────
+
+  function isMouseNearOverlay(event) {
+    if (!state.host || state.host.hidden) return false;
+    const rect = state.host.getBoundingClientRect();
+    const pad = state.stealthProximity;
+    return (
+      event.clientX >= rect.left - pad &&
+      event.clientX <= rect.right + pad &&
+      event.clientY >= rect.top - pad &&
+      event.clientY <= rect.bottom + pad
+    );
+  }
+
+  function setStealthVisible(visible, { pin = false } = {}) {
+    if (pin) state.stealthPinned = true;
+    // Always apply the styles: an early return on equal state would leave a
+    // freshly mounted overlay without its stealth styles until first toggle.
+    state.stealthVisible = visible;
+    if (state.host) {
+      const hiddenOpacity = String(state.config?.stealthOpacity ?? 0.08);
+      state.host.style.transition = "opacity 300ms ease";
+      state.host.style.opacity = visible ? "1" : hiddenOpacity;
+      state.host.style.pointerEvents = visible ? "auto" : "none";
+      if (!visible) state.stealthPinned = false;
+    }
+    // Show/hide the small stealth indicator
+    const indicator = state.shadow?.querySelector(".stealth-indicator");
+    if (indicator) indicator.classList.toggle("is-active", !visible && state.stealth);
+  }
+
+  function scheduleStealthHide() {
+    if (state.stealthTimer) clearTimeout(state.stealthTimer);
+    state.stealthTimer = setTimeout(() => {
+      state.stealthTimer = null;
+      // Don't hide while an action is running, mid-drag, or if pinned open.
+      if (state.busy || state.drag || state.stealthPinned) return;
+      setStealthVisible(false);
+    }, state.stealthAutoHideMs);
+  }
+
+  function handleStealthMouseMove(event) {
+    if (!state.stealth || state.host?.hidden) return;
+    if (isMouseNearOverlay(event)) {
+      if (state.stealthTimer) {
+        clearTimeout(state.stealthTimer);
+        state.stealthTimer = null;
+      }
+      if (!state.stealthPinned) setStealthVisible(true);
+    } else if (state.stealthVisible && !state.busy && !state.drag && !state.stealthPinned) {
+      // Mouse left proximity — start auto-hide timer
+      scheduleStealthHide();
+    }
+  }
+
+  function handleStealthKeydown(event) {
+    // Alt+Shift+X (Option+Shift+X on macOS): toggle stealth visibility.
+    // Guard first so the page keeps
+    // the combo when stealth is off or the overlay is not on this tab.
+    if (!event.altKey || !event.shiftKey || event.code !== "KeyX") return;
+    if (!state.stealth || state.host?.hidden) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (state.stealthVisible) {
+      if (state.stealthTimer) { clearTimeout(state.stealthTimer); state.stealthTimer = null; }
+      setStealthVisible(false);
+    } else {
+      setStealthVisible(true, { pin: true });
+      scheduleStealthHide();
+    }
+  }
+
+  function bindStealthEvents() {
+    document.addEventListener("mousemove", handleStealthMouseMove, { passive: true });
+    document.addEventListener("keydown", handleStealthKeydown, { capture: true });
+  }
+
+  function applyStealthMode(enabled) {
+    const previouslyEnabled = state.stealth;
+    state.stealth = enabled;
+    const indicator = state.shadow?.querySelector(".stealth-indicator");
+    if (enabled) {
+      // Only drop into the hidden state when stealth is newly enabled or the
+      // overlay just mounted. Settings re-syncs — e.g. persisting the
+      // collapse toggle round-trips through applyConfig — must not hide (and
+      // pointer-events:none) an overlay the user is actively interacting with.
+      if (!previouslyEnabled || !state.host?.isConnected) {
+        setStealthVisible(false);
+        indicator?.classList.add("is-active");
+      }
+    } else {
+      // Exiting stealth — ensure fully visible and interactive.
+      if (state.stealthTimer) { clearTimeout(state.stealthTimer); state.stealthTimer = null; }
+      state.stealthPinned = false;
+      setStealthVisible(true);
+      indicator?.classList.remove("is-active");
+    }
   }
 
   function applyConfig(value) {
@@ -669,13 +848,17 @@
     state.host.style.top = "auto";
     state.panel.style.setProperty("--opacity", String(config.opacity));
     state.panel.classList.toggle("is-pass-through", config.clickThrough);
-    const mode = role("interaction-mode");
-    if (mode) mode.textContent = config.clickThrough ? "内容区点击穿透" : "可正常操作";
+    // applyStealthMode must run BEFORE setCollapsed: on a fresh mount with a
+    // persisted expanded state, hiding first and letting setCollapsed's
+    // stealth semantics settle the final state avoids an expanded panel stuck
+    // at pointer-events:none (every button dead until the mouse comes near).
+    applyStealthMode(config.stealth);
     setCollapsed(firstMount ? config.collapsed : state.collapsed);
     return { visible: true };
   }
 
   function hide() {
+    if (state.stealthTimer) { clearTimeout(state.stealthTimer); state.stealthTimer = null; }
     if (state.host) state.host.hidden = true;
   }
 

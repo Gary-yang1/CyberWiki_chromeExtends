@@ -99,6 +99,11 @@
                 <input id="profileEndpoint" type="url" inputmode="url" autocomplete="url" placeholder="https://api.openai.com/v1/chat/completions" required />
                 <small id="endpointHint">使用 Chat Completions 兼容接口。</small>
               </label>
+              <label class="field field-wide">
+                <span>模型列表地址 <em>可选，一般留空</em></span>
+                <input id="profileModelsEndpoint" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="留空自动从 Endpoint 推导" />
+                <small>留空时自动推导，推导路径不存在会再尝试同站点的 /v1/models 与 /models。仅当自动发现失败或地址特殊时才需手动填写。</small>
+              </label>
               <label id="apiKeyField" class="field field-wide">
                 <span id="apiKeyLabel">API Key <em>保存后留空即可保留原密钥</em></span>
                 <span class="key-input-wrap">
