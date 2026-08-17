@@ -306,3 +306,29 @@ class SearchTests(unittest.TestCase):
     def test_empty_query_returns_nothing(self) -> None:
         self.assertEqual(self.store.search(""), [])
         self.assertEqual(self.store.search("   "), [])
+
+
+class ExtractionDeleteTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.store = ExtractionStore(Path(self.temporary_directory.name) / "extractions")
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def test_delete_removes_the_file_and_returns_last_summary(self) -> None:
+        record = self.store.save(sample_payload())
+        outcome = self.store.delete(record["id"])
+        self.assertEqual(outcome["deleted"], True)
+        self.assertEqual(outcome["id"], record["id"])
+        self.assertEqual(outcome["summary"]["questionCount"], 2)
+        with self.assertRaises(CollectorError):
+            self.store.load(record["id"])
+
+    def test_delete_missing_or_invalid_ids_is_rejected(self) -> None:
+        with self.assertRaises(CollectorError) as missing:
+            self.store.delete("20260817T000000Z-deadbeef")
+        self.assertEqual(missing.exception.status, 404)
+        with self.assertRaises(CollectorError) as invalid:
+            self.store.delete("../../etc/passwd")
+        self.assertEqual(invalid.exception.status, 400)

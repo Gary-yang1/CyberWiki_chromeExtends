@@ -124,10 +124,37 @@ button { cursor: pointer; }
 .question-actions { margin-top: 11px; }
 
 /* ── detail head ─────────────────────────────────────── */
-.detail-head { margin-bottom: 14px; }
+.detail-head { margin-bottom: 12px; }
 .detail-copy { margin: 10px 0; }
 .detail-copy h2 { margin: 0; font-size: 16px; line-height: 1.4; letter-spacing: -0.02em; overflow-wrap: anywhere; }
 .detail-copy p { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.detail-actions { display: grid; grid-template-columns: 1fr 1.3fr 0.7fr; gap: 8px; margin-bottom: 12px; }
+.detail-actions .button { min-height: 44px; padding: 0 6px; font-size: 12.5px; }
+.button-danger { border-color: #f0c7c2; background: var(--surface); color: var(--danger); }
+.button-danger.is-armed { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+/* ── pagination ──────────────────────────────────────── */
+.pagination-bar {
+  position: sticky;
+  top: calc(58px + env(safe-area-inset-top));
+  z-index: 4;
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: rgba(244, 247, 241, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.page-btn { width: 36px; height: 36px; font-size: 18px; }
+.page-info { color: var(--muted); font-size: 10.5px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }
+.jump-form { display: flex; gap: 6px; align-items: center; }
+.jump-form input { width: 64px; height: 36px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); padding: 0 8px; font-size: 12px; text-align: center; }
+.jump-form .button-small { min-height: 36px; padding: 0 10px; }
 
 /* ── buttons & fields ────────────────────────────────── */
 .button {

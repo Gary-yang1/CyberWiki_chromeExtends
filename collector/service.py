@@ -188,6 +188,18 @@ class ExtractionStore:
             raise CollectorError(404, "not_found", "提取记录不存在。")
         return record
 
+    def delete(self, extraction_id: str) -> dict[str, Any]:
+        """Remove one extraction file; returns its last summary for the UI."""
+        if not isinstance(extraction_id, str) or not ID_PATTERN.match(extraction_id):
+            raise CollectorError(400, "invalid_id", "提取记录 ID 无效。")
+        path = self.out_dir / f"{extraction_id}.json"
+        if not path.is_file():
+            raise CollectorError(404, "not_found", "提取记录不存在。")
+        record = self._read_file(path)
+        summary = self.summarize(record) if isinstance(record, dict) else None
+        path.unlink()
+        return {"id": extraction_id, "deleted": True, "summary": summary}
+
     def stats(self) -> dict[str, Any]:
         summaries = self._summaries()
         return {

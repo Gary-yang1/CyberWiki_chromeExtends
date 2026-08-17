@@ -524,6 +524,7 @@ Chrome 扩展的 Manifest 需要允许访问本地 API：
 | `POST` | `/api/v1/extractions` | 保存一次页面提取。 |
 | `GET` | `/api/v1/extractions?limit=&offset=` | 分页列出提取记录摘要（新在前）。 |
 | `GET` | `/api/v1/extractions/{id}` | 读取一条完整提取记录（含题目与答案）。 |
+| `DELETE` | `/api/v1/extractions/{id}` | 删除一条提取记录（文件即删，返回删除前的摘要）。 |
 | `POST` | `/api/v1/solve` | 调用已配置的模型解答题目并把答案写回文件。 |
 | `GET` / `PUT` | `/api/v1/model-config` | 读取（掩码）/保存服务端模型配置。 |
 | `POST` | `/api/v1/model-config/test` | 用当前配置发送最小测试请求。 |
