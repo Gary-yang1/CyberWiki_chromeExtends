@@ -57,24 +57,45 @@
     };
   }
 
-  function runtimeMessage(type, payload = {}) {
+  // Client-side cap so a lost message port (MV3 service worker recycled
+  // mid-request, extension reloaded in flight) can never leave the overlay
+  // stuck in its busy state — the callback would otherwise never fire.
+  const DEFAULT_RUNTIME_TIMEOUT_MS = 30_000;
+  const MAX_RUNTIME_TIMEOUT_MS = 420_000;
+
+  function runtimeMessage(type, payload = {}, { timeoutMs = DEFAULT_RUNTIME_TIMEOUT_MS } = {}) {
     return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({ type, payload }, (response) => {
-        const runtimeError = chrome.runtime.lastError;
-        if (runtimeError) {
-          reject(new Error(runtimeError.message));
-          return;
-        }
-        if (!response) {
-          reject(new Error("插件后台没有返回响应。"));
-          return;
-        }
-        if (response.ok === false) {
-          reject(new Error(response.error?.message || response.error || "浮窗操作失败。"));
-          return;
-        }
-        resolve(response.data ?? response);
-      });
+      let settled = false;
+      const timer = setTimeout(() => {
+        finish(reject, new Error("请求超时或连接中断，请重试。"));
+      }, Math.min(Math.max(timeoutMs, 1_000), MAX_RUNTIME_TIMEOUT_MS));
+      const finish = (settle, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        settle(value);
+      };
+      try {
+        chrome.runtime.sendMessage({ type, payload }, (response) => {
+          const runtimeError = chrome.runtime.lastError;
+          if (runtimeError) {
+            finish(reject, new Error(runtimeError.message));
+            return;
+          }
+          if (!response) {
+            finish(reject, new Error("插件后台没有返回响应。"));
+            return;
+          }
+          if (response.ok === false) {
+            finish(reject, new Error(response.error?.message || response.error || "浮窗操作失败。"));
+            return;
+          }
+          finish(resolve, response.data ?? response);
+        });
+      } catch (error) {
+        // A synchronously invalidated extension context throws here.
+        finish(reject, error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 
@@ -531,10 +552,17 @@
           setStatus(readiness?.message || "无法解答：请先在侧边栏配置并授权模型。", true);
           return;
         }
+        // Model calls legitimately run long (profile timeoutMs, up to 300s,
+        // possibly doubled by verification), so bound this request by the
+        // configured timeout plus a grace margin instead of the default cap.
+        const profileTimeoutMs = Math.min(
+          Math.max(Number(readiness.profile?.timeoutMs) || 30_000, 30_000),
+          300_000,
+        );
         const response = await runtimeMessage("CWKB_OVERLAY_ACTION", {
           action: "solve",
           questionId: state.question?.id,
-        });
+        }, { timeoutMs: profileTimeoutMs + 60_000 });
         const question = questionFromResponse(response);
         if (question) renderQuestion(question);
         absorbQuestions(response);
