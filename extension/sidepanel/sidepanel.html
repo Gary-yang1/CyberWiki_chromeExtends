@@ -229,6 +229,17 @@
               <span>采集服务 Endpoint</span>
               <input id="collectorEndpoint" type="url" inputmode="url" placeholder="http://127.0.0.1:8790/api/v1/extractions" />
             </label>
+            <div class="two-column">
+              <label class="field">
+                <span>User ID</span>
+                <input id="collectorUserId" type="text" autocomplete="off" spellcheck="false" placeholder="gary" />
+              </label>
+              <label class="field">
+                <span>Key</span>
+                <input id="collectorKey" type="password" autocomplete="off" spellcheck="false" placeholder="服务端分配的 Key" />
+              </label>
+            </div>
+            <p class="settings-help">服务端启用多用户鉴权（data/collector_auth.json）时需填写；题目按 User ID 分空间保存。测试连接会一并校验凭据。</p>
             <button id="collectorTestButton" class="button button-secondary button-wide" type="button">测试采集服务连接</button>
             <p id="collectorStatus" class="settings-help" aria-live="polite"></p>
           </fieldset>

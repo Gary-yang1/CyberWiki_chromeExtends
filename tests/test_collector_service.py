@@ -5,7 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from collector.service import CollectorError, ExtractionStore
+from collector.auth import load_users, resolve_user
+from collector.service import CollectorError, ExtractionStore, user_out_dir
 from collector.solver import (
     build_messages,
     load_config,
@@ -214,3 +215,94 @@ class SolverSolveTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AuthTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.base = Path(self.temporary_directory.name)
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def write_auth(self, payload) -> Path:
+        path = self.base / "auth.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    def test_open_mode_defaults_to_shared_space(self) -> None:
+        users = load_users(self.base / "missing.json")
+        self.assertEqual(users, {})
+        self.assertEqual(resolve_user(users, None, None), "default")
+
+    def test_gated_mode_requires_matching_credentials(self) -> None:
+        users = load_users(self.write_auth({"users": {"gary": "key-1", "alice": "key-2"}}))
+        self.assertEqual(resolve_user(users, "gary", "key-1"), "gary")
+        self.assertEqual(resolve_user(users, "alice", "key-2"), "alice")
+        with self.assertRaises(CollectorError) as missing:
+            resolve_user(users, None, None)
+        self.assertEqual(missing.exception.status, 401)
+        with self.assertRaises(CollectorError) as wrong:
+            resolve_user(users, "gary", "key-2")
+        self.assertEqual(wrong.exception.status, 401)
+        with self.assertRaises(CollectorError) as unsafe:
+            resolve_user(users, "../etc", "key-1")
+        self.assertEqual(unsafe.exception.status, 401)
+
+    def test_user_out_dir_rejects_traversal_and_scopes_storage(self) -> None:
+        with self.assertRaises(CollectorError):
+            user_out_dir(self.base, "../escape")
+        with self.assertRaises(CollectorError):
+            user_out_dir(self.base, "a" * 33)
+        self.assertEqual(user_out_dir(self.base, "gary"), self.base / "gary")
+
+
+class MultiUserIsolationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.base = Path(self.temporary_directory.name) / "extractions"
+        self.gary = ExtractionStore(user_out_dir(self.base, "gary"))
+        self.alice = ExtractionStore(user_out_dir(self.base, "alice"))
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def test_users_only_see_their_own_extractions(self) -> None:
+        gary_record = self.gary.save(sample_payload("Gary 专用题目"))
+        self.alice.save(sample_payload("Alice 专用题目"))
+        self.assertEqual(self.gary.stats()["extractions"], 1)
+        self.assertEqual(self.alice.stats()["extractions"], 1)
+        self.assertEqual(self.alice.list()["items"][0]["source"]["title"], "示例页面")
+        with self.assertRaises(CollectorError):
+            self.alice.load(gary_record["id"])
+
+
+class SearchTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.store = ExtractionStore(Path(self.temporary_directory.name) / "extractions")
+        record = self.store.save(sample_payload("SQL注入属于哪类攻击"))
+        record["questions"][0]["answer"] = "A"
+        self.store.write(record)
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def test_search_matches_stems_options_and_answers(self) -> None:
+        stem_hit = self.store.search("注入")[0]
+        self.assertEqual(stem_hit["questionIndex"], 0)
+        self.assertIn("SQL注入", stem_hit["stem"])
+
+        option_hit = self.store.search("2")  # option B text "2"
+        self.assertTrue(option_hit)
+
+        answer_hit = self.store.search("A")
+        self.assertTrue(any(hit["answer"] == "A" for hit in answer_hit))
+
+    def test_search_is_case_insensitive_and_scoped(self) -> None:
+        self.assertEqual(self.store.search("不存在的关键词xyz"), [])
+        self.assertTrue(self.store.search("  sql注入  "))
+
+    def test_empty_query_returns_nothing(self) -> None:
+        self.assertEqual(self.store.search(""), [])
+        self.assertEqual(self.store.search("   "), [])

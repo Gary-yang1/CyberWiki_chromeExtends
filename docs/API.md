@@ -500,12 +500,27 @@ Chrome 扩展的 Manifest 需要允许访问本地 API：
 
 题库采集服务（`./start_collector.sh`，默认 `http://127.0.0.1:8790`）与 benchmark 服务相互独立，接收 Chrome 插件的一键采集，并在 `/` 提供移动端题库界面。数据目录为 `data/extractions/`（每次提取一个 JSON 文件，git 忽略）。
 
+### 多用户鉴权（可选）
+
+创建 `data/collector_auth.json` 即启用按用户隔离：
+
+```json
+{ "users": { "gary": "key-gary-xxxx", "alice": "key-alice-yyyy" } }
+```
+
+- 启用后，**所有** `/api/v1` 请求必须携带 `X-User-Id` 与 `X-Api-Key` 请求头，key 需与该用户的配置匹配，否则返回 `401 {"error":{"code":"unauthorized"}}`。
+- 采集内容按用户分目录：`data/extractions/<userId>/`；每个用户只能列出、读取、检索、解答自己空间内的题目。
+- User ID 限 1–32 位字母/数字/下划线/连字符（防路径穿越）。
+- 未创建该文件（或 users 为空）时为开放模式：无需凭据，所有数据在共享的 `default` 空间。
+- 移动端 UI 在启用鉴权时显示登录页（凭据保存在浏览器 localStorage），可退出登录；插件侧边栏「题库采集」小节填写同样的 User ID/Key。
+
 ### 接口一览
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| `GET` | `/api/v1/health` | 健康检查。 |
+| `GET` | `/api/v1/health` | 健康检查（启用鉴权时一并校验凭据，返回 `user`）。 |
 | `GET` | `/api/v1/stats` | 提取次数、题目总数、已解答数。 |
+| `GET` | `/api/v1/search?q=&limit=` | 按题干/选项/答案关键词检索，返回题目级命中（含 `extractionId` 与 `questionIndex` 用于定位）。 |
 | `POST` | `/api/v1/extractions` | 保存一次页面提取。 |
 | `GET` | `/api/v1/extractions?limit=&offset=` | 分页列出提取记录摘要（新在前）。 |
 | `GET` | `/api/v1/extractions/{id}` | 读取一条完整提取记录（含题目与答案）。 |

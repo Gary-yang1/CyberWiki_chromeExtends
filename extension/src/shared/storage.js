@@ -37,6 +37,8 @@ export const DEFAULT_OVERLAY_SETTINGS = {
 export const DEFAULT_COLLECTOR_SETTINGS = {
   enabled: false,
   endpoint: "http://127.0.0.1:8790/api/v1/extractions",
+  userId: "",
+  key: "",
   timeoutMs: 5_000
 };
 
@@ -106,6 +108,8 @@ export function normalizeCollectorSettings(value = {}) {
     ...source,
     enabled: source.enabled === true,
     endpoint: String(source.endpoint || DEFAULT_COLLECTOR_SETTINGS.endpoint).trim(),
+    userId: String(source.userId || "").trim(),
+    key: String(source.key || "").trim(),
     timeoutMs: clampNumber(source.timeoutMs, DEFAULT_COLLECTOR_SETTINGS.timeoutMs, 500, 30_000)
   };
 }

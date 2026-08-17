@@ -16,8 +16,30 @@
     </header>
 
     <main class="views">
+      <!-- 登录（服务端启用多用户鉴权时出现） -->
+      <section id="loginView" class="view" hidden>
+        <form id="loginForm" class="login-card" novalidate>
+          <h2>登录题库</h2>
+          <p class="login-hint">该服务已启用多用户鉴权，输入服务端分配的账号。</p>
+          <label class="field">
+            <span>User ID</span>
+            <input id="loginUserId" type="text" autocomplete="username" spellcheck="false" required />
+          </label>
+          <label class="field">
+            <span>Key</span>
+            <input id="loginKey" type="password" autocomplete="current-password" spellcheck="false" required />
+          </label>
+          <button class="button button-primary button-wide" type="submit">登录</button>
+          <p id="loginStatus" class="settings-status" role="status" aria-live="polite"></p>
+        </form>
+      </section>
+
       <!-- 题库列表 -->
       <section id="bankView" class="view">
+        <form id="searchForm" class="search-row" role="search" novalidate>
+          <input id="searchInput" type="search" placeholder="检索题目 / 答案…" enterkeyhint="search" />
+          <button class="icon-btn" type="submit" aria-label="检索">🔍</button>
+        </form>
         <div id="statsRow" class="stats-row" aria-live="polite"></div>
         <div id="extractionList" class="card-list" aria-live="polite"></div>
         <button id="loadMoreButton" class="button button-secondary button-wide" type="button" hidden>加载更多</button>
@@ -69,6 +91,7 @@
             <button id="saveButton" class="button button-primary" type="submit">保存设置</button>
           </div>
           <p id="settingsStatus" class="settings-status" role="status" aria-live="polite"></p>
+          <button id="logoutButton" class="button button-secondary button-wide" type="button" hidden>退出登录</button>
         </form>
       </section>
     </main>

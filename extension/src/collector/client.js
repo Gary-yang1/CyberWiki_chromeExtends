@@ -27,6 +27,14 @@ function requireEndpoint(config) {
   return endpoint;
 }
 
+/** Per-user scoping headers; absent in open mode (no users configured). */
+function authHeaders(config) {
+  const userId = String(config?.userId || "").trim();
+  const key = String(config?.key || "").trim();
+  if (!userId || !key) return {};
+  return { "X-User-Id": userId, "X-Api-Key": key };
+}
+
 async function fetchWithCollectorTimeout(url, init, config, fetchImpl) {
   if (typeof fetchImpl !== "function") {
     throw new CollectorError("当前环境不支持网络请求。", { code: "fetch_unavailable" });
@@ -56,7 +64,7 @@ export async function collectExtraction(config, payload = {}, { fetchImpl = glob
   const endpoint = requireEndpoint(config);
   const response = await fetchWithCollectorTimeout(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders(config) },
     body: JSON.stringify(payload),
   }, config, fetchImpl);
 
@@ -91,7 +99,10 @@ export async function checkCollectorHealth(config, { fetchImpl = globalThis.fetc
   const endpoint = requireEndpoint(config);
   const healthUrl = `${new URL(endpoint).origin}/api/v1/health`;
   const startedAt = Date.now();
-  const response = await fetchWithCollectorTimeout(healthUrl, { method: "GET" }, config, fetchImpl);
+  const response = await fetchWithCollectorTimeout(healthUrl, {
+    method: "GET",
+    headers: authHeaders(config),
+  }, config, fetchImpl);
   let data = null;
   try {
     data = await response.json();
@@ -99,6 +110,12 @@ export async function checkCollectorHealth(config, { fetchImpl = globalThis.fetc
     data = null;
   }
   if (!response.ok) {
+    if (response.status === 401) {
+      throw new CollectorError("用户 ID 或 Key 不正确，或服务端已启用多用户鉴权。", {
+        status: 401,
+        code: data?.error?.code || "unauthorized",
+      });
+    }
     throw new CollectorError(
       data?.error?.message || `题库采集服务返回 HTTP ${response.status}。`,
       { status: response.status, code: data?.error?.code || "collector_http_error" },
@@ -107,6 +124,7 @@ export async function checkCollectorHealth(config, { fetchImpl = globalThis.fetc
   return {
     ok: true,
     service: String(data?.service || ""),
+    user: String(data?.user || ""),
     latencyMs: Date.now() - startedAt,
   };
 }

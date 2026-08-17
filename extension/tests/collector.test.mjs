@@ -6,6 +6,8 @@ import { CollectorError, checkCollectorHealth, collectExtraction } from "../src/
 const CONFIG = {
   enabled: true,
   endpoint: "http://127.0.0.1:8790/api/v1/extractions",
+  userId: "gary",
+  key: "key-gary-123",
   timeoutMs: 2_000,
 };
 
@@ -34,6 +36,8 @@ test("posts the extraction as JSON to the configured endpoint", async () => {
   assert.equal(observed.url, CONFIG.endpoint);
   assert.equal(observed.init.method, "POST");
   assert.equal(observed.init.headers["Content-Type"], "application/json");
+  assert.equal(observed.init.headers["X-User-Id"], "gary");
+  assert.equal(observed.init.headers["X-Api-Key"], "key-gary-123");
   assert.deepEqual(observed.body.questions, PAYLOAD.questions);
   assert.deepEqual(result, {
     saved: true,
@@ -88,19 +92,49 @@ test("health check probes the endpoint's origin and reports latency", async () =
   let observed;
   const result = await checkCollectorHealth(CONFIG, {
     fetchImpl: async (url, init) => {
-      observed = { url, method: init.method };
+      observed = { url, method: init.method, headers: init.headers };
       return {
         ok: true,
         status: 200,
-        json: async () => ({ status: "ok", service: "CyberWikiBench Collector" }),
+        json: async () => ({ status: "ok", service: "CyberWikiBench Collector", user: "gary" }),
       };
     },
   });
   assert.equal(observed.url, "http://127.0.0.1:8790/api/v1/health");
   assert.equal(observed.method, "GET");
+  assert.equal(observed.headers["X-User-Id"], "gary");
+  assert.equal(observed.headers["X-Api-Key"], "key-gary-123");
   assert.equal(result.ok, true);
-  assert.equal(result.service, "CyberWikiBench Collector");
+  assert.equal(result.user, "gary");
   assert.equal(typeof result.latencyMs, "number");
+});
+
+test("auth headers are omitted in open mode and 401 maps to a credential error", async () => {
+  let observed;
+  await checkCollectorHealth({ ...CONFIG, userId: "", key: "" }, {
+    fetchImpl: async (url, init) => {
+      observed = init.headers;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "ok", service: "s", user: "default" }),
+      };
+    },
+  });
+  assert.equal(observed["X-User-Id"], undefined);
+  assert.equal(observed["X-Api-Key"], undefined);
+
+  await assert.rejects(
+    checkCollectorHealth(CONFIG, {
+      fetchImpl: async () => ({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: { code: "unauthorized", message: "用户 ID 或 Key 不正确。" } }),
+      }),
+    }),
+    (error) => error instanceof CollectorError && error.status === 401
+      && error.code === "unauthorized" && /Key/.test(error.message),
+  );
 });
 
 test("health check maps non-2xx responses to typed errors", async () => {

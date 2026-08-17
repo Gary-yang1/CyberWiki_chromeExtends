@@ -252,18 +252,22 @@ test("normalizes collector settings and merges them into saved patches", async (
     collector: {
       enabled: true,
       endpoint: " http://127.0.0.1:8790/api/v1/extractions ",
+      userId: " gary ",
+      key: " key-gary-123 ",
       timeoutMs: 100,
     },
   });
   assert.deepEqual(saved.collector, {
     enabled: true,
     endpoint: "http://127.0.0.1:8790/api/v1/extractions",
+    userId: "gary",
+    key: "key-gary-123",
     timeoutMs: 500,
   });
 
   // A later patch without collector keys must not clobber the section.
   await saveSettings({ routing: { mode: "balanced" } });
-  assert.equal((await getSettings()).collector.enabled, true);
+  assert.equal((await getSettings()).collector.userId, "gary");
 
   resetSettings();
   assert.deepEqual(
@@ -271,6 +275,8 @@ test("normalizes collector settings and merges them into saved patches", async (
     {
       enabled: false,
       endpoint: "http://127.0.0.1:8790/api/v1/extractions",
+      userId: "",
+      key: "",
       timeoutMs: 5_000,
     },
   );

@@ -10,7 +10,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from .service import CollectorError, ExtractionStore
+from . import auth
+from .service import CollectorError, ExtractionStore, user_out_dir
 from .solver import (
     load_config,
     mask_config,
@@ -22,19 +23,29 @@ from .solver import (
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUT = PROJECT_ROOT / "data" / "extractions"
 DEFAULT_CONFIG = PROJECT_ROOT / "data" / "collector_config.json"
+DEFAULT_AUTH = PROJECT_ROOT / "data" / "collector_auth.json"
 DEFAULT_STATIC = PROJECT_ROOT / "collector" / "web"
 
 
 class CollectorHandler(BaseHTTPRequestHandler):
-    store: ExtractionStore
+    out_base: Path
+    auth_path: Path
     config_path: Path
     static_root: Path
+
+    def _user(self) -> str:
+        """Resolve the scoped user from X-User-Id/X-Api-Key (open mode → default)."""
+        users = auth.load_users(self.auth_path)
+        return auth.resolve_user(users, self.headers.get("X-User-Id"), self.headers.get("X-Api-Key"))
+
+    def _store(self) -> ExtractionStore:
+        return ExtractionStore(user_out_dir(self.out_base, self._user()))
 
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(HTTPStatus.NO_CONTENT)
         self._cors_headers()
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-Id, X-Api-Key")
         self.end_headers()
 
     def do_GET(self) -> None:  # noqa: N802
@@ -42,23 +53,31 @@ class CollectorHandler(BaseHTTPRequestHandler):
         path = parsed.path
         try:
             if path == "/api/v1/health":
-                self._send_json({"status": "ok", "service": "CyberWikiBench Collector"})
+                user = self._user()
+                self._send_json({"status": "ok", "service": "CyberWikiBench Collector", "user": user})
                 return
             if path == "/api/v1/stats":
-                self._send_json(self.store.stats())
+                self._send_json(self._store().stats())
+                return
+            if path == "/api/v1/search":
+                query = parse_qs(parsed.query)
+                user_query = query.get("q", [""])[0]
+                limit = query.get("limit", ["50"])[0]
+                self._send_json({"query": user_query, "hits": self._store().search(user_query, limit)})
                 return
             if path == "/api/v1/model-config":
+                self._user()  # gated once users exist; config itself stays shared
                 self._send_json(mask_config(load_config(self.config_path)))
                 return
             if path == "/api/v1/extractions":
                 query = parse_qs(parsed.query)
                 limit = query.get("limit", ["50"])[0]
                 offset = query.get("offset", ["0"])[0]
-                self._send_json(self.store.list(limit, offset))
+                self._send_json(self._store().list(limit, offset))
                 return
             if path.startswith("/api/v1/extractions/"):
                 extraction_id = unquote(path.removeprefix("/api/v1/extractions/"))
-                self._send_json(self.store.load(extraction_id))
+                self._send_json(self._store().load(extraction_id))
                 return
             if path.startswith("/api/"):
                 raise CollectorError(404, "not_found", "API 路径不存在。")
@@ -74,7 +93,7 @@ class CollectorHandler(BaseHTTPRequestHandler):
         try:
             payload = self._read_json()
             if path == "/api/v1/extractions":
-                record = self.store.save(payload)
+                record = self._store().save(payload)
                 self._send_json(
                     {
                         "saved": True,
@@ -89,7 +108,7 @@ class CollectorHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/v1/solve":
                 outcome = solve_for_extraction(
-                    self.store,
+                    self._store(),
                     load_config(self.config_path),
                     str(payload.get("extractionId") or ""),
                     payload.get("questionIndexes"),
@@ -98,6 +117,7 @@ class CollectorHandler(BaseHTTPRequestHandler):
                 self._send_json(outcome)
                 return
             if path == "/api/v1/model-config/test":
+                self._user()
                 outcome = test_connection(load_config(self.config_path))
                 self._send_json(outcome)
                 return
@@ -113,6 +133,7 @@ class CollectorHandler(BaseHTTPRequestHandler):
         try:
             if path != "/api/v1/model-config":
                 raise CollectorError(404, "not_found", "API 路径不存在。")
+            self._user()
             payload = self._read_json()
             saved = save_config(self.config_path, payload)
             self._send_json(mask_config(saved))
@@ -180,15 +201,17 @@ class CollectorHandler(BaseHTTPRequestHandler):
 def create_server(
     host: str,
     port: int,
-    out_dir: Path = DEFAULT_OUT,
+    out_base: Path = DEFAULT_OUT,
     config_path: Path = DEFAULT_CONFIG,
     static_root: Path = DEFAULT_STATIC,
+    auth_path: Path = DEFAULT_AUTH,
 ) -> ThreadingHTTPServer:
     handler = type(
         "ConfiguredCollectorHandler",
         (CollectorHandler,),
         {
-            "store": ExtractionStore(out_dir),
+            "out_base": Path(out_base),
+            "auth_path": Path(auth_path),
             "config_path": Path(config_path),
             "static_root": Path(static_root).resolve(),
         },
@@ -202,10 +225,11 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=8790)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--auth", type=Path, default=DEFAULT_AUTH)
     parser.add_argument("--static", type=Path, default=DEFAULT_STATIC)
     args = parser.parse_args()
 
-    server = create_server(args.host, args.port, args.out, args.config, args.static)
+    server = create_server(args.host, args.port, args.out, args.config, args.static, args.auth)
     print(f"CyberWikiBench Collector running at http://{args.host}:{args.port}")
     print("Tip: use --host 0.0.0.0 to reach the mobile UI from a phone on your LAN.")
     try:

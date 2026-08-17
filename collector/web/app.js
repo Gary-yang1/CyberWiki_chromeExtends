@@ -3,21 +3,35 @@
   "use strict";
 
   const PAGE_SIZE = 20;
+  const AUTH_STORAGE_KEY = "cwkb_collector_auth";
   const state = {
     tab: "bank",
     offset: 0,
     total: 0,
     items: [],
     extraction: null,
+    auth: null,
   };
 
   const $ = (selector) => document.querySelector(selector);
 
+  function loadAuth() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || "null");
+      if (raw && raw.userId && raw.key) return raw;
+    } catch {
+      /* corrupted entry falls through to login */
+    }
+    return null;
+  }
+
   async function api(path, init = {}) {
-    const response = await fetch(path, {
-      ...init,
-      headers: { "Content-Type": "application/json", ...(init.headers || {}) },
-    });
+    const headers = { "Content-Type": "application/json", ...(init.headers || {}) };
+    if (state.auth) {
+      headers["X-User-Id"] = state.auth.userId;
+      headers["X-Api-Key"] = state.auth.key;
+    }
+    const response = await fetch(path, { ...init, headers });
     let payload = null;
     try {
       payload = await response.json();
@@ -203,7 +217,7 @@
       ${question.rawText ? `<p class="raw-text">模型原文：${escapeHtml(question.rawText)}</p>` : ""}`;
   }
 
-  async function openDetail(id) {
+  async function openDetail(id, focusIndex = -1) {
     try {
       state.extraction = await api(`/api/v1/extractions/${encodeURIComponent(id)}`);
       const source = state.extraction.source || {};
@@ -211,6 +225,54 @@
       $("#detailMeta").textContent = `${formatTime(state.extraction.savedAt)} · ${source.url || ""}`;
       renderQuestions();
       switchView("detail");
+      if (focusIndex >= 0) {
+        const card = document.querySelector(`.question-card[data-index="${focusIndex}"]`);
+        if (card) {
+          card.scrollIntoView({ behavior: "smooth", block: "center" });
+          card.classList.add("is-located");
+          window.setTimeout(() => card.classList.remove("is-located"), 2400);
+        }
+      }
+    } catch (error) {
+      showToast(error.message, "error");
+    }
+  }
+
+  // ── search ───────────────────────────────────────────────
+
+  async function runSearch(event) {
+    event.preventDefault();
+    const query = $("#searchInput").value.trim();
+    if (!query) {
+      loadList();
+      return;
+    }
+    try {
+      const data = await api(`/api/v1/search?q=${encodeURIComponent(query)}`);
+      const list = $("#extractionList");
+      list.replaceChildren();
+      $("#loadMoreButton").hidden = true;
+      $("#statsRow").replaceChildren();
+      if (!data.hits.length) {
+        const note = document.createElement("p");
+        note.className = "empty-note";
+        note.innerHTML = `<strong>没有匹配「${escapeHtml(query)}」的题目</strong>清空搜索框可返回题库列表。`;
+        list.append(note);
+        return;
+      }
+      data.hits.forEach((hit) => {
+        const card = document.createElement("button");
+        card.type = "button";
+        card.className = "extraction-card search-hit";
+        const answer = hit.answer === null || hit.answer === undefined
+          ? ""
+          : ` · 答案 ${escapeHtml(answerText(hit.answer))}`;
+        card.innerHTML = `
+          <span class="source">${escapeHtml(hit.stem)}</span>
+          <span class="host">${escapeHtml(formatTime(hit.savedAt))} · 第 ${hit.questionIndex + 1} 题${answer}</span>`;
+        card.addEventListener("click", () => openDetail(hit.extractionId, hit.questionIndex));
+        list.append(card);
+      });
     } catch (error) {
       showToast(error.message, "error");
     }
@@ -327,6 +389,7 @@
 
   function switchView(view) {
     state.tab = view;
+    $("#loginView").hidden = view !== "login";
     $("#bankView").hidden = view !== "bank";
     $("#detailView").hidden = view !== "detail";
     $("#settingsView").hidden = view !== "settings";
@@ -334,9 +397,65 @@
       const active = button.dataset.tab === view;
       button.classList.toggle("is-active", active);
     });
-    $(".tabbar").classList.toggle("is-hidden", view === "detail");
+    $(".tabbar").classList.toggle("is-hidden", view === "detail" || view === "login");
     if (view === "bank") refreshAll();
     if (view === "settings") loadSettings();
+  }
+
+  // ── auth ─────────────────────────────────────────────────
+
+  async function login(event) {
+    event.preventDefault();
+    const userId = $("#loginUserId").value.trim();
+    const key = $("#loginKey").value.trim();
+    const status = $("#loginStatus");
+    if (!userId || !key) {
+      status.textContent = "请填写 User ID 和 Key。";
+      status.className = "settings-status is-error";
+      return;
+    }
+    status.textContent = "正在验证…";
+    status.className = "settings-status";
+    const previous = state.auth;
+    state.auth = { userId, key };
+    try {
+      const health = await api("/api/v1/health");
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(state.auth));
+      status.textContent = "";
+      showToast(`已登录：${health.user || userId}`);
+      $("#logoutButton").hidden = false;
+      switchView("bank");
+    } catch (error) {
+      state.auth = previous;
+      status.textContent = `登录失败：${error.message}`;
+      status.className = "settings-status is-error";
+    }
+  }
+
+  function logout() {
+    state.auth = null;
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    $("#logoutButton").hidden = true;
+    switchView("login");
+  }
+
+  async function detectAuthMode() {
+    // Open mode (no users configured) enters straight into the bank.
+    try {
+      await api("/api/v1/health");
+      $("#logoutButton").hidden = !state.auth;
+      switchView("bank");
+    } catch (error) {
+      if (state.auth || String(error.message).includes("用户") || String(error.message).includes("X-Api-Key")) {
+        switchView("login");
+        $("#loginStatus").textContent = state.auth ? "凭据已失效，请重新登录。" : "";
+        state.auth = null;
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+        return;
+      }
+      showToast(error.message, "error");
+      switchView("bank");
+    }
   }
 
   function bindEvents() {
@@ -352,8 +471,15 @@
     $("#solveAllButton").addEventListener("click", () => solveIndexes(null));
     $("#settingsForm").addEventListener("submit", saveSettings);
     $("#testButton").addEventListener("click", testConnection);
+    $("#searchForm").addEventListener("submit", runSearch);
+    $("#searchInput").addEventListener("input", (event) => {
+      if (!event.target.value.trim()) loadList();
+    });
+    $("#loginForm").addEventListener("submit", login);
+    $("#logoutButton").addEventListener("click", logout);
   }
 
   bindEvents();
-  refreshAll();
+  state.auth = loadAuth();
+  detectAuthMode();
 })();

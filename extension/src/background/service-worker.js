@@ -872,12 +872,14 @@ async function handleMessage(message, sender) {
       return collectCurrentPage(sender, payload);
     case "GET_COLLECTOR_HEALTH": {
       const settings = await getSettings();
-      const endpoint = payload.endpoint || settings.collector?.endpoint;
-      await ensureEndpointPermission(endpoint, "题库采集服务");
-      return checkCollectorHealth({
-        endpoint,
-        timeoutMs: settings.collector?.timeoutMs,
-      });
+      const config = {
+        ...settings.collector,
+        ...(payload.endpoint ? { endpoint: payload.endpoint } : {}),
+        ...(payload.userId !== undefined ? { userId: payload.userId } : {}),
+        ...(payload.key !== undefined ? { key: payload.key } : {}),
+      };
+      await ensureEndpointPermission(config.endpoint, "题库采集服务");
+      return checkCollectorHealth(config);
     }
     case "APPLY_LOW_INTERFERENCE_OVERLAY": {
       const settings = await getSettings();

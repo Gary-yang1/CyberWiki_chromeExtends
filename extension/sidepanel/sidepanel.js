@@ -302,6 +302,8 @@ function applySettingsToForm() {
   $("#ragTopK").value = String(rag.topK || 3);
   $("#collectorEnabled").checked = collector.enabled === true;
   $("#collectorEndpoint").value = collector.endpoint || "http://127.0.0.1:8790/api/v1/extractions";
+  $("#collectorUserId").value = collector.userId || "";
+  $("#collectorKey").value = collector.key || "";
   applyOverlaySettingsToForm();
 }
 
@@ -379,10 +381,15 @@ async function testCollectorConnection() {
   setButtonBusy(button, true, "测试中…");
   setCollectorStatus(`正在连接 ${new URL(endpoint).origin} …`);
   try {
-    // Test against the form value, without persisting it first.
-    const result = await sendMessage("GET_COLLECTOR_HEALTH", { endpoint });
+    // Test against the form values, without persisting them first.
+    const result = await sendMessage("GET_COLLECTOR_HEALTH", {
+      endpoint,
+      userId: $("#collectorUserId").value.trim(),
+      key: $("#collectorKey").value.trim(),
+    });
+    const userNote = result?.user ? ` · 用户 ${result.user}` : "";
     setCollectorStatus(
-      `连接成功 · ${result?.latencyMs ?? "?"} ms${result?.service ? ` · ${result.service}` : ""}。`,
+      `连接成功 · ${result?.latencyMs ?? "?"} ms${result?.service ? ` · ${result.service}` : ""}${userNote}。`,
       "success",
     );
   } catch (error) {
@@ -817,6 +824,8 @@ async function saveRouting(event) {
     collector: {
       enabled: $("#collectorEnabled").checked,
       endpoint: collectorEndpoint || "http://127.0.0.1:8790/api/v1/extractions",
+      userId: $("#collectorUserId").value.trim(),
+      key: $("#collectorKey").value.trim(),
     },
     // The overlay fieldset lives in this same form; persist what it shows so
     // the post-save refresh does not revert unsaved overlay edits.

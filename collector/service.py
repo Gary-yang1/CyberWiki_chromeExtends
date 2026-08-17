@@ -28,6 +28,18 @@ def utc_now() -> str:
 # <UTC stamp>Z-<content hash 8>[-<collision counter>]
 ID_PATTERN = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{8}(-\d+)?$")
 MAX_QUESTIONS_PER_EXTRACTION = 500
+# Storage scopes are one directory name per user; keep them traversal-safe.
+USER_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+
+
+def user_out_dir(base_dir: Path, user_id: str) -> Path:
+    """Resolve the per-user extraction directory, rejecting unsafe ids."""
+    candidate = str(user_id or "").strip()
+    if not USER_ID_PATTERN.match(candidate):
+        raise CollectorError(
+            400, "invalid_user_id", "用户 ID 无效（仅限 1–32 位字母、数字、下划线、连字符）。"
+        )
+    return Path(base_dir) / candidate
 
 
 def _normalize_question(question: Any) -> dict[str, Any]:
@@ -184,3 +196,56 @@ class ExtractionStore:
             "solved": sum(item["solvedCount"] or 0 for item in summaries),
             "lastSavedAt": summaries[0]["savedAt"] if summaries else None,
         }
+
+    def _question_haystack(self, question: dict[str, Any]) -> str:
+        parts = [question.get("stem"), question.get("rawText")]
+        options = question.get("options")
+        if isinstance(options, dict):
+            parts.extend(str(value) for value in options.values())
+        elif isinstance(options, list):
+            for option in options:
+                if isinstance(option, dict):
+                    parts.extend(str(option.get(key)) for key in ("key", "text", "value"))
+                else:
+                    parts.append(str(option))
+        answer = question.get("answer")
+        if isinstance(answer, list):
+            parts.extend(str(item) for item in answer)
+        elif answer is not None:
+            parts.append(str(answer))
+        return "\n".join(str(part) for part in parts if part).lower()
+
+    def search(self, query: str, limit: int = 50) -> list[dict[str, Any]]:
+        """Case-insensitive substring search across stems, options and answers.
+
+        Hits are question-level and newest extraction first, so the UI can
+        jump straight to extraction + question index.
+        """
+        needle = str(query or "").strip().lower()
+        if not needle:
+            return []
+        limit = max(1, min(int(limit), 200))
+        hits: list[dict[str, Any]] = []
+        for path in sorted(self.out_dir.glob("*.json"), reverse=True):
+            record = self._read_file(path)
+            if not record:
+                continue
+            questions = record.get("questions")
+            if not isinstance(questions, list):
+                continue
+            for index, question in enumerate(questions):
+                if not isinstance(question, dict):
+                    continue
+                if needle not in self._question_haystack(question):
+                    continue
+                stem = str(question.get("stem") or "")
+                hits.append({
+                    "extractionId": record.get("id"),
+                    "savedAt": record.get("savedAt"),
+                    "questionIndex": index,
+                    "stem": stem[:200],
+                    "answer": question.get("answer"),
+                })
+                if len(hits) >= limit:
+                    return hits
+        return hits
