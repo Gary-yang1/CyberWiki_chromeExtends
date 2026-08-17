@@ -45,6 +45,7 @@
     // 保持容器范围，避免把其他网页普通表单的 .field 当作题目。
     "#divQuestion .field.ui-field-contain",
     "#divQuestion [topic][type]",
+    "[class*='subject-item']",
     "fieldset",
   ].join(",");
 
@@ -267,7 +268,8 @@
   function elementOptionKey(element, input, text, index) {
     const elementKey = attrValue(element, ANSWER_ATTRIBUTE_NAMES);
     const inputKey = attrValue(input, ANSWER_ATTRIBUTE_NAMES);
-    const explicit = elementKey || inputKey || optionKeyFromText(text) || input?.value || "";
+    const explicit = elementKey || inputKey || optionKeyFromText(text)
+      || heuristics.optionKeyLikeValue(input?.value) || "";
     return normalizeOptionKey(explicit, index);
   }
 
@@ -369,12 +371,29 @@
         const root = explicitQuestionRoot(input);
         const form = input.form || closestComposed(input, "form");
         const choiceContainer = nearestChoiceContainer(input);
-        const container = root || choiceContainer || form || composedParent(input);
-        const scope = root || form || container;
         const kind = input.type === "checkbox" ? "checkbox" : "radio";
         const name = String(input.name || "").trim();
-        return { input, root, form, container, choiceContainer, scope, kind, name };
+        return { input, root, form, choiceContainer, kind, name };
       });
+    // Element Plus wraps EACH option in its own [role=radiogroup] and gives
+    // every input a unique generated name, so container/name grouping would
+    // shatter one question into singleton groups (all dropped by the >=2
+    // filter). When the immediate choice container holds no same-kind peer,
+    // re-anchor onto the smallest ancestor that does, so the options regroup.
+    for (const record of records) {
+      const sameKindInputs = records
+        .filter((other) => other.kind === record.kind)
+        .map((other) => other.input);
+      const hasPeerInContainer = records.some((other) => other !== record
+        && other.kind === record.kind
+        && composedContains(record.choiceContainer, other.input));
+      const fallbackContainer = smallestContainerWithPeers(record.input, sameKindInputs);
+      record.container = record.root
+        || (hasPeerInContainer ? record.choiceContainer : (fallbackContainer || record.choiceContainer))
+        || record.form
+        || composedParent(record.input);
+      record.scope = record.root || record.form || record.container;
+    }
     const nameCounts = new Map();
     for (const record of records) {
       if (!record.name) continue;
@@ -548,6 +567,8 @@
       .replace(/^\s*(?:question|题目)\s*\d+\s*[:：#.-]?\s*/i, "")
       .replace(/^\s*\d{1,4}\s*[.．、:：]\s*/, "")
       .replace(/^\s*(?:\[|【|\()?\s*(?:单选题|多选题|判断题)\s*(?:\]|】|\))?\s*/i, "")
+      // Trailing score markers such as "[1分]" / "（1.5 分）" are page chrome.
+      .replace(/[\[（(]\s*\d+(?:\.\d+)?\s*分\s*[\]）)]?\s*$/i, "")
       .trim();
   }
 

@@ -239,6 +239,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .overlay-status { min-height: 16px; margin: 8px 1px 0; }
 .overlay-status.is-error { color: var(--danger); }
 .overlay-status.is-success { color: var(--accent-dark); }
+#collectorStatus.is-error { color: var(--danger); }
+#collectorStatus.is-success { color: var(--accent-dark); }
 .type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .check-card { position: relative; display: flex; align-items: center; min-height: 62px; padding: 11px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); cursor: pointer; transition: border-color 150ms var(--ease), background 150ms var(--ease), box-shadow 150ms var(--ease), transform 120ms var(--ease); }
 .check-card:hover { border-color: var(--line-strong); }

@@ -292,6 +292,7 @@ function applyOverlaySettingsToForm() {
 function applySettingsToForm() {
   const routing = state.settings.routing || state.settings;
   const rag = state.settings.rag || {};
+  const collector = state.settings.collector || {};
   $("#routingMode").value = routing.mode || routing.routingMode || "balanced";
   $("#benchmarkApiUrl").value = state.settings.benchmarkApiBaseUrl || state.settings.benchmarkApiUrl || DEFAULT_BENCHMARK_URL;
   $("#ragEnabled").checked = rag.enabled === true;
@@ -299,6 +300,10 @@ function applySettingsToForm() {
   $("#ragEndpoint").value = rag.endpoint || "http://127.0.0.1:8787/retrieve";
   $("#ragCollection").value = rag.collection || "";
   $("#ragTopK").value = String(rag.topK || 3);
+  $("#collectorEnabled").checked = collector.enabled === true;
+  $("#collectorEndpoint").value = collector.endpoint || "http://127.0.0.1:8790/api/v1/extractions";
+  $("#collectorUserId").value = collector.userId || "";
+  $("#collectorKey").value = collector.key || "";
   applyOverlaySettingsToForm();
 }
 
@@ -355,6 +360,40 @@ async function applyOverlayToCurrentPage() {
     const persisted = normalizedOverlaySettings();
     $("#overlayEnabled").checked = persisted.enabled;
     setOverlayStatus(error?.message || "无法更新浮窗。", "error");
+  } finally {
+    setButtonBusy(button, false);
+  }
+}
+
+function setCollectorStatus(message, variant = "") {
+  const node = $("#collectorStatus");
+  node.textContent = message;
+  node.className = `settings-help${variant ? ` is-${variant}` : ""}`;
+}
+
+async function testCollectorConnection() {
+  const button = $("#collectorTestButton");
+  const endpoint = $("#collectorEndpoint").value.trim() || "http://127.0.0.1:8790/api/v1/extractions";
+  if (!/^https?:\/\//i.test(endpoint)) {
+    setCollectorStatus("采集服务 Endpoint 必须以 http(s):// 开头。", "error");
+    return;
+  }
+  setButtonBusy(button, true, "测试中…");
+  setCollectorStatus(`正在连接 ${new URL(endpoint).origin} …`);
+  try {
+    // Test against the form values, without persisting them first.
+    const result = await sendMessage("GET_COLLECTOR_HEALTH", {
+      endpoint,
+      userId: $("#collectorUserId").value.trim(),
+      key: $("#collectorKey").value.trim(),
+    });
+    const userNote = result?.user ? ` · 用户 ${result.user}` : "";
+    setCollectorStatus(
+      `连接成功 · ${result?.latencyMs ?? "?"} ms${result?.service ? ` · ${result.service}` : ""}${userNote}。`,
+      "success",
+    );
+  } catch (error) {
+    setCollectorStatus(`连接失败：${error?.message || "未知错误"}`, "error");
   } finally {
     setButtonBusy(button, false);
   }
@@ -768,6 +807,11 @@ async function saveRouting(event) {
     verifierProfileId: $("#verifierProfileSelect").value || null,
     fallbackProfileId: $("#fallbackProfileSelect").value || null,
   };
+  const collectorEndpoint = $("#collectorEndpoint").value.trim();
+  if (collectorEndpoint && !/^https?:\/\//i.test(collectorEndpoint)) {
+    showToast("题库采集 Endpoint 必须以 http(s):// 开头。", "error");
+    return;
+  }
   const patch = {
     routing,
     benchmarkApiBaseUrl: $("#benchmarkApiUrl").value.trim() || DEFAULT_BENCHMARK_URL,
@@ -776,6 +820,12 @@ async function saveRouting(event) {
       endpoint: ragEndpoint,
       collection: $("#ragCollection").value.trim(),
       topK: Number($("#ragTopK").value) || 3,
+    },
+    collector: {
+      enabled: $("#collectorEnabled").checked,
+      endpoint: collectorEndpoint || "http://127.0.0.1:8790/api/v1/extractions",
+      userId: $("#collectorUserId").value.trim(),
+      key: $("#collectorKey").value.trim(),
     },
     // The overlay fieldset lives in this same form; persist what it shows so
     // the post-save refresh does not revert unsaved overlay edits.
@@ -866,6 +916,7 @@ function bindEvents() {
     if ($("#overlayEnabled").checked) applyOverlayToCurrentPage();
   });
   $("#overlayApplyButton").addEventListener("click", applyOverlayToCurrentPage);
+  $("#collectorTestButton").addEventListener("click", testCollectorConnection);
   $("#openOptionsButton").addEventListener("click", () => {
     if (globalThis.chrome?.runtime?.openOptionsPage) chrome.runtime.openOptionsPage();
     else showToast("无法打开设置页面。", "error");

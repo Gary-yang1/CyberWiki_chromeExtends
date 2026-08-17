@@ -218,6 +218,32 @@
             </div>
           </fieldset>
 
+          <fieldset class="settings-subsection">
+            <legend>题库采集</legend>
+            <label class="inline-toggle">
+              <input id="collectorEnabled" type="checkbox" />
+              <span>开启一键采集（页面按 Alt / ⌥ + Shift + C）</span>
+            </label>
+            <p class="settings-help">在题目页面按快捷键，提取当前页全部题目并发往本地题库服务；工具栏图标会闪 ✓/! 反馈结果。快捷键若与系统冲突，可在 chrome://extensions/shortcuts 自行修改。采集与浏览需先运行 start_collector.sh。</p>
+            <label class="field">
+              <span>采集服务 Endpoint</span>
+              <input id="collectorEndpoint" type="url" inputmode="url" placeholder="http://127.0.0.1:8790/api/v1/extractions" />
+            </label>
+            <div class="two-column">
+              <label class="field">
+                <span>User ID</span>
+                <input id="collectorUserId" type="text" autocomplete="off" spellcheck="false" placeholder="gary" />
+              </label>
+              <label class="field">
+                <span>Key</span>
+                <input id="collectorKey" type="password" autocomplete="off" spellcheck="false" placeholder="服务端分配的 Key" />
+              </label>
+            </div>
+            <p class="settings-help">服务端启用多用户鉴权（data/collector_auth.json）时需填写；题目按 User ID 分空间保存。测试连接会一并校验凭据。</p>
+            <button id="collectorTestButton" class="button button-secondary button-wide" type="button">测试采集服务连接</button>
+            <p id="collectorStatus" class="settings-help" aria-live="polite"></p>
+          </fieldset>
+
           <fieldset class="settings-subsection overlay-settings">
             <legend>低干扰浮窗</legend>
             <label class="inline-toggle">
