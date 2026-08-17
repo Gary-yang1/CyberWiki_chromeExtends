@@ -44,7 +44,7 @@ class CollectorHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(HTTPStatus.NO_CONTENT)
         self._cors_headers()
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-Id, X-Api-Key")
         self.end_headers()
 
@@ -141,6 +141,20 @@ class CollectorHandler(BaseHTTPRequestHandler):
             self._send_collector_error(exc)
         except Exception as exc:  # pragma: no cover - defensive HTTP boundary
             self.log_error("Unhandled PUT error: %s", exc)
+            self._send_collector_error(CollectorError(500, "internal_error", "服务端内部错误。"))
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        path = urlparse(self.path).path
+        try:
+            if not path.startswith("/api/v1/extractions/"):
+                raise CollectorError(404, "not_found", "API 路径不存在。")
+            extraction_id = unquote(path.removeprefix("/api/v1/extractions/"))
+            outcome = self._store().delete(extraction_id)
+            self._send_json(outcome)
+        except CollectorError as exc:
+            self._send_collector_error(exc)
+        except Exception as exc:  # pragma: no cover - defensive HTTP boundary
+            self.log_error("Unhandled DELETE error: %s", exc)
             self._send_collector_error(CollectorError(500, "internal_error", "服务端内部错误。"))
 
     def _read_json(self) -> dict:

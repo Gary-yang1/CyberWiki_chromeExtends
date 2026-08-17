@@ -53,7 +53,20 @@
             <h2 id="detailTitle">提取详情</h2>
             <p id="detailMeta"></p>
           </div>
-          <button id="solveAllButton" class="button button-primary" type="button">全部解答</button>
+        </div>
+        <div class="detail-actions">
+          <button id="solvePageButton" class="button button-primary" type="button">解答本页</button>
+          <button id="solveAllButton" class="button button-secondary" type="button">全部解答 · 逐页</button>
+          <button id="deleteButton" class="button button-danger" type="button">删除</button>
+        </div>
+        <div id="paginationBar" class="pagination-bar" hidden>
+          <button id="prevPageButton" class="icon-btn page-btn" type="button" aria-label="上一页">‹</button>
+          <span id="pageInfo" class="page-info"></span>
+          <button id="nextPageButton" class="icon-btn page-btn" type="button" aria-label="下一页">›</button>
+          <form id="jumpForm" class="jump-form" novalidate>
+            <input id="jumpInput" type="number" min="1" step="1" inputmode="numeric" placeholder="题号" aria-label="跳转到题号" />
+            <button class="button button-secondary button-small" type="submit">跳转</button>
+          </form>
         </div>
         <div id="questionList" class="card-list"></div>
       </section>

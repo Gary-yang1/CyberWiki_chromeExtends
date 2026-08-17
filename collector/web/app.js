@@ -3,6 +3,7 @@
   "use strict";
 
   const PAGE_SIZE = 20;
+  const QUESTIONS_PER_PAGE = 20;
   const AUTH_STORAGE_KEY = "cwkb_collector_auth";
   const state = {
     tab: "bank",
@@ -11,6 +12,11 @@
     items: [],
     extraction: null,
     auth: null,
+    page: 1,
+    stopSolving: false,
+    solvingAll: false,
+    deleteArmed: false,
+    deleteTimer: null,
   };
 
   const $ = (selector) => document.querySelector(selector);
@@ -167,10 +173,38 @@
       .join("")}</ul>`;
   }
 
+  function totalPages() {
+    const count = state.extraction?.questions?.length || 0;
+    return Math.max(1, Math.ceil(count / QUESTIONS_PER_PAGE));
+  }
+
+  function pageQuestionIndexes(page = state.page) {
+    const count = state.extraction?.questions?.length || 0;
+    const start = (page - 1) * QUESTIONS_PER_PAGE;
+    const indexes = [];
+    for (let index = start; index < Math.min(start + QUESTIONS_PER_PAGE, count); index += 1) {
+      indexes.push(index);
+    }
+    return indexes;
+  }
+
+  function renderPagination() {
+    const bar = $("#paginationBar");
+    const pages = totalPages();
+    bar.hidden = pages <= 1;
+    const count = state.extraction?.questions?.length || 0;
+    const start = (state.page - 1) * QUESTIONS_PER_PAGE + 1;
+    const end = Math.min(state.page * QUESTIONS_PER_PAGE, count);
+    $("#pageInfo").textContent = `第 ${state.page}/${pages} 页 · ${count ? `${start}–${end} 题` : "无题目"} · 共 ${count} 题`;
+    $("#prevPageButton").disabled = state.page <= 1;
+    $("#nextPageButton").disabled = state.page >= pages;
+  }
+
   function renderQuestions() {
     const list = $("#questionList");
     list.replaceChildren();
-    state.extraction.questions.forEach((question, index) => {
+    for (const index of pageQuestionIndexes()) {
+      const question = state.extraction.questions[index];
       const card = document.createElement("article");
       card.className = "question-card";
       card.dataset.index = String(index);
@@ -187,10 +221,39 @@
           </button>
         </div>`;
       list.append(card);
-    });
+    }
     list.querySelectorAll("[data-solve]").forEach((button) => {
       button.addEventListener("click", () => solveIndexes([Number(button.dataset.solve)], button));
     });
+    renderPagination();
+  }
+
+  function goToPage(page, focusIndex = -1) {
+    state.page = Math.min(Math.max(1, page), totalPages());
+    renderQuestions();
+    const top = $("#paginationBar");
+    top.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (focusIndex >= 0) {
+      const card = document.querySelector(`.question-card[data-index="${focusIndex}"]`);
+      if (card) {
+        card.scrollIntoView({ behavior: "smooth", block: "center" });
+        card.classList.add("is-located");
+        window.setTimeout(() => card.classList.remove("is-located"), 2400);
+      }
+    }
+  }
+
+  function jumpToQuestion(event) {
+    event.preventDefault();
+    const number = Number($("#jumpInput").value);
+    const count = state.extraction?.questions?.length || 0;
+    if (!Number.isInteger(number) || number < 1 || number > count) {
+      showToast(`请输入 1–${count} 之间的题号。`, "error");
+      return;
+    }
+    const index = number - 1;
+    goToPage(Math.floor(index / QUESTIONS_PER_PAGE) + 1, index);
+    $("#jumpInput").value = "";
   }
 
   function answerBox(question) {
@@ -223,15 +286,14 @@
       const source = state.extraction.source || {};
       $("#detailTitle").textContent = source.title || hostOf(source.url);
       $("#detailMeta").textContent = `${formatTime(state.extraction.savedAt)} · ${source.url || ""}`;
-      renderQuestions();
+      disarmDelete();
       switchView("detail");
       if (focusIndex >= 0) {
-        const card = document.querySelector(`.question-card[data-index="${focusIndex}"]`);
-        if (card) {
-          card.scrollIntoView({ behavior: "smooth", block: "center" });
-          card.classList.add("is-located");
-          window.setTimeout(() => card.classList.remove("is-located"), 2400);
-        }
+        goToPage(Math.floor(focusIndex / QUESTIONS_PER_PAGE) + 1, focusIndex);
+      } else {
+        state.page = 1;
+        renderQuestions();
+        window.scrollTo({ top: 0 });
       }
     } catch (error) {
       showToast(error.message, "error");
@@ -279,18 +341,18 @@
   }
 
   async function solveIndexes(indexes, button) {
-    if (!state.extraction) return;
-    const target = button || $("#solveAllButton");
-    setButtonBusy(target, true, "解答中…");
+    if (!state.extraction || !indexes?.length) return;
+    const target = button;
+    if (target) setButtonBusy(target, true, "解答中…");
     try {
       const outcome = await api("/api/v1/solve", {
         method: "POST",
         body: JSON.stringify({
           extractionId: state.extraction.id,
-          // null → server solves every unanswered question; a single index is
-          // an explicit per-question request and re-solves (force).
           questionIndexes: indexes,
-          force: Array.isArray(indexes) && indexes.length === 1,
+          // A single index is an explicit per-question request and re-solves;
+          // page batches skip questions that already have answers.
+          force: indexes.length === 1,
         }),
       });
       state.extraction = await api(
@@ -302,10 +364,98 @@
       } else {
         showToast("这些题已有答案，未重复调用。");
       }
+      return outcome;
+    } catch (error) {
+      showToast(error.message, "error");
+      return null;
+    } finally {
+      if (target) setButtonBusy(target, false);
+    }
+  }
+
+  async function solveCurrentPage() {
+    if (state.solvingAll) return;
+    await solveIndexes(pageQuestionIndexes(), $("#solvePageButton"));
+  }
+
+  // Auto-solving is tasked page by page: one short request per page instead of
+  // a single long-running call, with progress on the button and a stop toggle.
+  async function solveAllPages() {
+    if (!state.extraction) return;
+    if (state.solvingAll) {
+      state.stopSolving = true;
+      $("#solveAllButton").textContent = "正在停止…";
+      return;
+    }
+    state.solvingAll = true;
+    state.stopSolving = false;
+    const button = $("#solveAllButton");
+    button.disabled = false;
+    try {
+      let solvedTotal = 0;
+      for (let page = 1; page <= totalPages(); page += 1) {
+        if (state.stopSolving) break;
+        button.textContent = `停止 · ${page}/${totalPages()} 页`;
+        const outcome = await api("/api/v1/solve", {
+          method: "POST",
+          body: JSON.stringify({
+            extractionId: state.extraction.id,
+            questionIndexes: pageQuestionIndexes(page),
+            force: false,
+          }),
+        });
+        solvedTotal += outcome.solved || 0;
+        state.extraction = await api(
+          `/api/v1/extractions/${encodeURIComponent(state.extraction.id)}`
+        );
+        state.page = page;
+        renderQuestions();
+      }
+      showToast(state.stopSolving
+        ? `已停止，本次共解答 ${solvedTotal} 题。`
+        : `逐页解答完成，共 ${solvedTotal} 题。`);
     } catch (error) {
       showToast(error.message, "error");
     } finally {
-      setButtonBusy(target, false);
+      state.solvingAll = false;
+      state.stopSolving = false;
+      button.textContent = "全部解答 · 逐页";
+    }
+  }
+
+  // ── delete (two-step confirm) ─────────────────────────────
+
+  function disarmDelete() {
+    state.deleteArmed = false;
+    window.clearTimeout(state.deleteTimer);
+    const button = $("#deleteButton");
+    button.textContent = "删除";
+    button.classList.remove("is-armed");
+  }
+
+  async function deleteExtraction() {
+    if (!state.extraction) return;
+    const button = $("#deleteButton");
+    if (!state.deleteArmed) {
+      state.deleteArmed = true;
+      button.textContent = "确认删除？";
+      button.classList.add("is-armed");
+      state.deleteTimer = window.setTimeout(disarmDelete, 4000);
+      return;
+    }
+    disarmDelete();
+    setButtonBusy(button, true, "删除中…");
+    try {
+      await api(`/api/v1/extractions/${encodeURIComponent(state.extraction.id)}`, {
+        method: "DELETE",
+      });
+      showToast("提取记录已删除。");
+      state.extraction = null;
+      switchView("bank");
+    } catch (error) {
+      showToast(error.message, "error");
+    } finally {
+      setButtonBusy(button, false);
     }
   }
 
@@ -462,13 +612,22 @@
     document.querySelectorAll(".tab-button").forEach((button) => {
       button.addEventListener("click", () => switchView(button.dataset.tab));
     });
-    $("#backButton").addEventListener("click", () => switchView("bank"));
+    $("#backButton").addEventListener("click", () => {
+      state.stopSolving = true;
+      disarmDelete();
+      switchView("bank");
+    });
     $("#refreshButton").addEventListener("click", refreshAll);
     $("#loadMoreButton").addEventListener("click", async () => {
       state.offset += PAGE_SIZE;
       await loadList({ append: true });
     });
-    $("#solveAllButton").addEventListener("click", () => solveIndexes(null));
+    $("#solvePageButton").addEventListener("click", solveCurrentPage);
+    $("#solveAllButton").addEventListener("click", solveAllPages);
+    $("#deleteButton").addEventListener("click", deleteExtraction);
+    $("#prevPageButton").addEventListener("click", () => goToPage(state.page - 1));
+    $("#nextPageButton").addEventListener("click", () => goToPage(state.page + 1));
+    $("#jumpForm").addEventListener("submit", jumpToQuestion);
     $("#settingsForm").addEventListener("submit", saveSettings);
     $("#testButton").addEventListener("click", testConnection);
     $("#searchForm").addEventListener("submit", runSearch);
