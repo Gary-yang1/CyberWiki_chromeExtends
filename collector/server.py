@@ -151,7 +151,7 @@ class CollectorHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError as exc:
             raise CollectorError(400, "invalid_content_length", "Content-Length 无效。") from exc
-        if length < 1 or length > 2 * 1024 * 1024:
+        if length < 1 or length > 5 * 1024 * 1024:
             raise CollectorError(400, "invalid_body_size", "请求体大小无效。")
         try:
             payload = json.loads(self.rfile.read(length).decode("utf-8"))

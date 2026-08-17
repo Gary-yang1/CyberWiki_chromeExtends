@@ -258,11 +258,13 @@ async function overlayReadiness() {
 /**
  * Badge flash for shortcut feedback. The service worker may suspend before a
  * cleanup timer fires, so the next run clears it instead of a timer.
- *   ok    → green checkmark, collection reached the server
- *   empty → yellow question mark, the page yielded no recognizable questions
- *   error → red exclamation, network / permission / server failure
+ *   pending → blue ellipsis, extraction in flight (large pages take seconds)
+ *   ok      → green checkmark, collection reached the server
+ *   empty   → yellow question mark, the page yielded no recognizable questions
+ *   error   → red exclamation, network / permission / server failure
  */
 const COLLECTOR_BADGE_STYLES = {
+  pending: { color: "#2b60c5", text: "…" },
   ok: { color: "#177653", text: "✓" },
   empty: { color: "#d97706", text: "?" },
   error: { color: "#b33f36", text: "!" },
@@ -290,6 +292,9 @@ async function collectCurrentPage(sender, payload = {}) {
     return { collected: false, reason: "disabled" };
   }
   try {
+    // Signal immediately: extraction on a large page can take seconds, and
+    // without this the badge stays empty until the very end.
+    await flashCollectorBadge("pending");
     // sender.tab pins the request to the tab that pressed the shortcut.
     const extraction = await extractCurrentQuestion(sender, payload);
     await ensureEndpointPermission(settings.collector.endpoint, "题库采集服务");
