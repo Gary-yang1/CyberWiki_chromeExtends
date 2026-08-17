@@ -17,6 +17,7 @@ import {
 import { ProviderError, solveWithProfile, testProfileConnection } from "../providers/index.js";
 import { deriveModelsEndpoint, listProviderModels } from "../providers/model-catalog.js";
 import { retrieveContext } from "../rag/client.js";
+import { checkCollectorHealth, collectExtraction } from "../collector/client.js";
 
 const CONTENT_SCRIPT_FILE = "content/content-script.js";
 const QUESTION_HEURISTICS_FILE = "content/question-heuristics.js";
@@ -31,6 +32,7 @@ const CONTENT_MESSAGE_TYPES = new Set([
   "CWKB_OVERLAY_DISABLE",
   "CWKB_OVERLAY_COLLAPSED",
   "CWKB_OVERLAY_READINESS",
+  "COLLECT_CURRENT_PAGE",
 ]);
 
 const extractedQuestions = new Map();
@@ -251,6 +253,55 @@ async function overlayReadiness() {
     };
   }
   return { ready: true, profile: sanitizeProfile(profile) };
+}
+
+/**
+ * Badge flash for shortcut feedback. The service worker may suspend before a
+ * cleanup timer fires, so the next run clears it instead of a timer.
+ */
+async function flashCollectorBadge(ok) {
+  try {
+    await chrome.action.setBadgeBackgroundColor({ color: ok ? "#177653" : "#b33f36" });
+    await chrome.action.setBadgeText({ text: ok ? "✓" : "!" });
+  } catch {
+    // The action API is unavailable in some test contexts; feedback is lost.
+  }
+}
+
+async function collectCurrentPage(sender, payload = {}) {
+  // Always clear the previous badge before attempting a fresh collection.
+  try {
+    await chrome.action.setBadgeText({ text: "" });
+  } catch {
+    /* ignore */
+  }
+  const settings = await getSettings();
+  if (!settings.collector?.enabled) {
+    return { collected: false, reason: "disabled" };
+  }
+  try {
+    // sender.tab pins the request to the tab that pressed the shortcut.
+    const extraction = await extractCurrentQuestion(sender, payload);
+    await ensureEndpointPermission(settings.collector.endpoint, "题库采集服务");
+    const confirmation = await collectExtraction(settings.collector, {
+      extractedAt: new Date().toISOString(),
+      url: extraction.url,
+      title: extraction.title,
+      questions: extraction.questions,
+    });
+    await flashCollectorBadge(true);
+    return {
+      collected: true,
+      id: confirmation.extraction.id,
+      count: confirmation.extraction.questionCount,
+    };
+  } catch (error) {
+    await flashCollectorBadge(false);
+    throw appError(
+      error?.message || "采集失败。",
+      error?.code || "COLLECT_FAILED",
+    );
+  }
 }
 
 async function sendToContent(tabId, message) {
@@ -817,6 +868,17 @@ async function handleMessage(message, sender) {
       return overlayReadiness();
     case "CWKB_OVERLAY_DISABLE":
       return disableOverlay();
+    case "COLLECT_CURRENT_PAGE":
+      return collectCurrentPage(sender, payload);
+    case "GET_COLLECTOR_HEALTH": {
+      const settings = await getSettings();
+      const endpoint = payload.endpoint || settings.collector?.endpoint;
+      await ensureEndpointPermission(endpoint, "题库采集服务");
+      return checkCollectorHealth({
+        endpoint,
+        timeoutMs: settings.collector?.timeoutMs,
+      });
+    }
     case "APPLY_LOW_INTERFERENCE_OVERLAY": {
       const settings = await getSettings();
       if (!settings.overlay?.enabled) {

@@ -218,6 +218,21 @@
             </div>
           </fieldset>
 
+          <fieldset class="settings-subsection">
+            <legend>题库采集</legend>
+            <label class="inline-toggle">
+              <input id="collectorEnabled" type="checkbox" />
+              <span>开启一键采集（页面按 Alt / ⌥ + Shift + E）</span>
+            </label>
+            <p class="settings-help">在题目页面按快捷键，提取当前页全部题目并发往本地题库服务；工具栏图标会闪 ✓/! 反馈结果。采集与浏览需先运行 start_collector.sh。</p>
+            <label class="field">
+              <span>采集服务 Endpoint</span>
+              <input id="collectorEndpoint" type="url" inputmode="url" placeholder="http://127.0.0.1:8790/api/v1/extractions" />
+            </label>
+            <button id="collectorTestButton" class="button button-secondary button-wide" type="button">测试采集服务连接</button>
+            <p id="collectorStatus" class="settings-help" aria-live="polite"></p>
+          </fieldset>
+
           <fieldset class="settings-subsection overlay-settings">
             <legend>低干扰浮窗</legend>
             <label class="inline-toggle">

@@ -26,6 +26,19 @@ Linux / macOS：
 python -m benchmark.server --host 127.0.0.1 --port 8765
 ```
 
+## 题库采集服务
+
+配套的题库采集服务独立运行在 `127.0.0.1:8790`，与 benchmark 服务互不依赖：
+
+```bash
+./start_collector.sh            # macOS / Linux
+.\start_collector.ps1           # Windows PowerShell
+```
+
+启动后手机/电脑浏览器打开 <http://127.0.0.1:8790> 即可使用移动端题库界面（浏览提取记录、调用 AI 解答、配置模型）。真机访问用 `--host 0.0.0.0` 启动，手机连同一局域网访问电脑 IP。
+
+配合 Chrome 插件使用：在插件侧边栏「题库采集」小节开启开关，之后在任意已授权的题目页面按 **Alt / ⌥ + Shift + E**，当前页全部题目即一键入库（工具栏图标闪 ✓/! 反馈结果）。每次提取保存为 `data/extractions/` 下的一个独立 JSON 文件，重复提取全部保留（附内容哈希）。
+
 ## 图形化评测
 
 界面支持：
@@ -72,6 +85,10 @@ API 的完整启动方式、PowerShell/curl/Python 示例、请求与响应字�
 | `benchmark/server.py` | 本地 HTTP 与静态页面服务器。 |
 | `benchmark/service.py` | 抽题、持久化和自动评分核心。 |
 | `web/` | 图形化评测页面。 |
+| `collector/server.py` | 题库采集服务（端口 8790，接收插件采集、服务移动端题库 UI）。 |
+| `collector/service.py` | 提取记录存储（`data/extractions/` 每次提取一个 JSON）。 |
+| `collector/solver.py` | 服务端 AI 解答（OpenAI 兼容接口，答案写回提取文件）。 |
+| `collector/web/` | 移动端题库界面。 |
 | `scripts/run_model_benchmark.py` | 大模型 CLI 自动评测器。 |
 | `scripts/parse_question_bank.py` | 原始题库解析与 JSONL 校验。 |
 | `data/questions.jsonl` | 规范题库源数据。 |

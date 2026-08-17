@@ -245,3 +245,33 @@ test("normalizes and persists low-interference overlay preferences", async () =>
   resetSettings();
   assert.deepEqual((await getSettings()).overlay, DEFAULT_OVERLAY_SETTINGS);
 });
+
+test("normalizes collector settings and merges them into saved patches", async () => {
+  resetSettings();
+  const saved = await saveSettings({
+    collector: {
+      enabled: true,
+      endpoint: " http://127.0.0.1:8790/api/v1/extractions ",
+      timeoutMs: 100,
+    },
+  });
+  assert.deepEqual(saved.collector, {
+    enabled: true,
+    endpoint: "http://127.0.0.1:8790/api/v1/extractions",
+    timeoutMs: 500,
+  });
+
+  // A later patch without collector keys must not clobber the section.
+  await saveSettings({ routing: { mode: "balanced" } });
+  assert.equal((await getSettings()).collector.enabled, true);
+
+  resetSettings();
+  assert.deepEqual(
+    (await getSettings()).collector,
+    {
+      enabled: false,
+      endpoint: "http://127.0.0.1:8790/api/v1/extractions",
+      timeoutMs: 5_000,
+    },
+  );
+});

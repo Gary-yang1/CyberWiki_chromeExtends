@@ -999,6 +999,31 @@
     return undefined;
   });
 
+  function isEditableTarget(target) {
+    if (!(target instanceof Element)) return false;
+    return Boolean(
+      target.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']")
+    );
+  }
+
+  // Alt/Option + Shift + E: extract this page and send it to the collector
+  // server. Feedback is the service-worker badge, so the handler stays silent;
+  // guards run first so pages keep the combo when collection is off.
+  document.addEventListener("keydown", (event) => {
+    if (!event.altKey || !event.shiftKey || event.code !== "KeyE") return;
+    if (isEditableTarget(event.target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      chrome.runtime.sendMessage({ type: "COLLECT_CURRENT_PAGE" }, () => {
+        // Swallow chrome.runtime.lastError: the badge already reports outcome.
+        void chrome.runtime.lastError;
+      });
+    } catch {
+      // The extension context may be gone (update/reload); nothing to do.
+    }
+  }, true);
+
   document.addEventListener("mouseover", (event) => {
     const target = event.target instanceof Element ? event.target : null;
     const root = target?.closest(QUESTION_ROOT_SELECTOR);

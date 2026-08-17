@@ -15,6 +15,16 @@
     "default_path": "sidepanel/sidepanel.html"
   },
   "options_page": "options/options.html",
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": [
+        "content/question-heuristics.js",
+        "content/content-script.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
   "permissions": [
     "activeTab",
     "tabs",

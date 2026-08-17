@@ -2,6 +2,10 @@
 data/benchmark_runs.sqlite3
 runs/
 
+# Collector runtime data (extractions may embed page content; config holds the API key)
+data/extractions/
+data/collector_config.json
+
 # Secrets and local configuration
 .env
 .env.*

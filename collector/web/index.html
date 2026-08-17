@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light" />
+    <title>题库采集 · CyberWikiBench</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <span class="brand">CWKB <small>题库采集</small></span>
+        <button id="refreshButton" class="icon-btn" type="button" aria-label="刷新列表">↻</button>
+      </div>
+    </header>
+
+    <main class="views">
+      <!-- 题库列表 -->
+      <section id="bankView" class="view">
+        <div id="statsRow" class="stats-row" aria-live="polite"></div>
+        <div id="extractionList" class="card-list" aria-live="polite"></div>
+        <button id="loadMoreButton" class="button button-secondary button-wide" type="button" hidden>加载更多</button>
+      </section>
+
+      <!-- 提取详情 -->
+      <section id="detailView" class="view" hidden>
+        <div class="detail-head">
+          <button id="backButton" class="button button-secondary" type="button">← 返回</button>
+          <div class="detail-copy">
+            <h2 id="detailTitle">提取详情</h2>
+            <p id="detailMeta"></p>
+          </div>
+          <button id="solveAllButton" class="button button-primary" type="button">全部解答</button>
+        </div>
+        <div id="questionList" class="card-list"></div>
+      </section>
+
+      <!-- 设置 -->
+      <section id="settingsView" class="view" hidden>
+        <form id="settingsForm" novalidate>
+          <label class="field">
+            <span>接口 Base 地址</span>
+            <input id="endpointInput" type="url" inputmode="url" autocomplete="off"
+              placeholder="https://api.deepseek.com/v1" required />
+            <small>OpenAI 兼容服务；填 Base 地址（以 /v1 结尾）或完整 …/chat/completions 均可。</small>
+          </label>
+          <label class="field">
+            <span>API Key <em id="apiKeyHint"></em></span>
+            <input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" />
+            <small>已保存过密钥时留空表示不修改。密钥只保存在本机 data/collector_config.json。</small>
+          </label>
+          <label class="field">
+            <span>模型 ID</span>
+            <input id="modelInput" type="text" autocomplete="off" placeholder="deepseek-chat" required />
+          </label>
+          <div class="field-row">
+            <label class="field">
+              <span>最大输出 Token</span>
+              <input id="maxTokensInput" type="number" min="16" max="8192" step="1" value="512" required />
+            </label>
+            <label class="field">
+              <span>超时（毫秒）</span>
+              <input id="timeoutInput" type="number" min="1000" max="300000" step="500" value="60000" required />
+            </label>
+          </div>
+          <div class="settings-actions">
+            <button id="testButton" class="button button-secondary" type="button">测试连接</button>
+            <button id="saveButton" class="button button-primary" type="submit">保存设置</button>
+          </div>
+          <p id="settingsStatus" class="settings-status" role="status" aria-live="polite"></p>
+        </form>
+      </section>
+    </main>
+
+    <nav class="tabbar" aria-label="主导航">
+      <button class="tab-button is-active" data-tab="bank" type="button">题库</button>
+      <button class="tab-button" data-tab="settings" type="button">设置</button>
+    </nav>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -495,3 +495,67 @@ Chrome 扩展的 Manifest 需要允许访问本地 API：
 - 不要把测试集的评分 `details` 或标准答案再次放入模型上下文。
 
 正式发布扩展时，应在 API 服务中增加固定 Token、限制允许的扩展 Origin，并避免将服务绑定到 `0.0.0.0`。
+
+## 题库采集服务（端口 8790）
+
+题库采集服务（`./start_collector.sh`，默认 `http://127.0.0.1:8790`）与 benchmark 服务相互独立，接收 Chrome 插件的一键采集，并在 `/` 提供移动端题库界面。数据目录为 `data/extractions/`（每次提取一个 JSON 文件，git 忽略）。
+
+### 接口一览
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/api/v1/health` | 健康检查。 |
+| `GET` | `/api/v1/stats` | 提取次数、题目总数、已解答数。 |
+| `POST` | `/api/v1/extractions` | 保存一次页面提取。 |
+| `GET` | `/api/v1/extractions?limit=&offset=` | 分页列出提取记录摘要（新在前）。 |
+| `GET` | `/api/v1/extractions/{id}` | 读取一条完整提取记录（含题目与答案）。 |
+| `POST` | `/api/v1/solve` | 调用已配置的模型解答题目并把答案写回文件。 |
+| `GET` / `PUT` | `/api/v1/model-config` | 读取（掩码）/保存服务端模型配置。 |
+| `POST` | `/api/v1/model-config/test` | 用当前配置发送最小测试请求。 |
+
+### 保存一次提取
+
+```bash
+curl -X POST http://127.0.0.1:8790/api/v1/extractions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://quiz.example/page",
+    "title": "示例页面",
+    "extractedAt": "2026-08-17T10:00:00.000Z",
+    "questions": [
+      { "id": "q1", "type": "single_choice", "stem": "1+1=?", "options": { "A": "1", "B": "2" } }
+    ]
+  }'
+```
+
+响应 `201`：
+
+```json
+{
+  "saved": true,
+  "extraction": { "id": "20260817T100000Z-abcd1234", "questionCount": 1, "contentHash": "abcd1234ef567890" }
+}
+```
+
+校验规则：`questions` 必须是非空数组，每项必须包含非空 `stem` 字符串；单次最多 500 题。同一内容重复提交会各自保存（保留全部），`contentHash` 供后续工具去重。
+
+### AI 解答
+
+先在移动端 UI 的「设置」页（或 `PUT /api/v1/model-config`）配置 OpenAI 兼容接口、API Key 与模型 ID（例如 `https://api.deepseek.com/v1` + `deepseek-chat`）。密钥只保存在本机 `data/collector_config.json`，读取接口只返回掩码。
+
+```bash
+curl -X POST http://127.0.0.1:8790/api/v1/solve \
+  -H "Content-Type: application/json" \
+  -d '{ "extractionId": "20260817T100000Z-abcd1234", "questionIndexes": [0] }'
+```
+
+- `questionIndexes` 省略或为 `null`：解答该次提取中所有未解题目。
+- `force: true`：重新解答（默认跳过已有答案的题目）。
+- 答案、置信度、模型名、耗时会写回 `data/extractions/<id>.json` 中对应题目的 `answer` 等字段。
+- 模型输出无法解析为 JSON 时保留 `rawText`，`answer` 为 `null`，不会报错。
+
+### Chrome 插件一键采集
+
+1. 运行 `./start_collector.sh`。
+2. 插件侧边栏「答题设置 → 题库采集」开启开关（Endpoint 默认 `http://127.0.0.1:8790/api/v1/extractions`）。
+3. 在已授权的题目页面按 **Alt / ⌥ + Shift + E**：提取当前页全部题目并发送，工具栏图标闪 `✓`（成功）或 `!`（失败）。

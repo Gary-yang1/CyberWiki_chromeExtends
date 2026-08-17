@@ -34,6 +34,12 @@ export const DEFAULT_OVERLAY_SETTINGS = {
   }
 };
 
+export const DEFAULT_COLLECTOR_SETTINGS = {
+  enabled: false,
+  endpoint: "http://127.0.0.1:8790/api/v1/extractions",
+  timeoutMs: 5_000
+};
+
 const DEFAULT_SETTINGS = {
   schemaVersion: 1,
   benchmarkApiBaseUrl: DEFAULT_BENCHMARK_API,
@@ -47,7 +53,8 @@ const DEFAULT_SETTINGS = {
     enableVerification: false
   },
   rag: DEFAULT_RAG_SETTINGS,
-  overlay: DEFAULT_OVERLAY_SETTINGS
+  overlay: DEFAULT_OVERLAY_SETTINGS,
+  collector: DEFAULT_COLLECTOR_SETTINGS
 };
 
 function normalizeRag(value = {}) {
@@ -89,6 +96,17 @@ export function normalizeOverlaySettings(value = {}) {
       right: clampNumber(position.right, DEFAULT_OVERLAY_SETTINGS.position.right, 8, 10_000),
       bottom: clampNumber(position.bottom, DEFAULT_OVERLAY_SETTINGS.position.bottom, 8, 10_000)
     }
+  };
+}
+
+export function normalizeCollectorSettings(value = {}) {
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    ...DEFAULT_COLLECTOR_SETTINGS,
+    ...source,
+    enabled: source.enabled === true,
+    endpoint: String(source.endpoint || DEFAULT_COLLECTOR_SETTINGS.endpoint).trim(),
+    timeoutMs: clampNumber(source.timeoutMs, DEFAULT_COLLECTOR_SETTINGS.timeoutMs, 500, 30_000)
   };
 }
 
@@ -163,7 +181,8 @@ function normalizeSettings(value = {}) {
     ...source,
     routing: { ...DEFAULT_SETTINGS.routing, ...(source.routing || {}) },
     rag: normalizeRag(source.rag),
-    overlay: normalizeOverlaySettings(source.overlay)
+    overlay: normalizeOverlaySettings(source.overlay),
+    collector: normalizeCollectorSettings(source.collector)
   };
   merged.profiles = Array.isArray(source.profiles)
     ? source.profiles.map(normalizeProfile)
@@ -204,6 +223,7 @@ export async function saveSettings(patch) {
     ...patch,
     routing: { ...current.routing, ...(patch.routing || {}) },
     rag: { ...current.rag, ...(patch.rag || {}) },
+    collector: { ...current.collector, ...(patch.collector || {}) },
     overlay: {
       ...current.overlay,
       ...(patch.overlay || {}),
