@@ -47,7 +47,7 @@
       enabled: value.enabled === true,
       stealth: value.stealth === true,
       stealthOpacity: clamp(value.stealthOpacity ?? 0.08, 0.01, 0.3),
-      opacity: clamp(value.opacity || 0.68, 0.3, 1),
+      opacity: clamp(value.opacity || 0.68, 0.01, 1),
       clickThrough: value.clickThrough === true,
       collapsed: value.collapsed !== false,
       position: {
