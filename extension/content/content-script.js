@@ -118,16 +118,28 @@
     "false", "错误", "否", "错", "×", "x", "no", "n", "f", "0",
   ]);
 
+  // extractAllQuestions runs synchronously, so the DOM cannot mutate mid-run;
+  // these per-run caches make repeated innerText/getComputedStyle walks over
+  // the same elements (hundreds of options on large exam pages) cheap.
+  let extractionCaches = null;
+
   /**
    * Preserve meaningful visual line breaks, especially in <pre> command
    * output, while removing indentation introduced only by HTML formatting.
    */
   function textWithLineBreaks(element) {
     if (!element) return "";
+    const cache = extractionCaches?.text;
+    if (cache) {
+      const hit = cache.get(element);
+      if (hit !== undefined) return hit;
+    }
     const raw = typeof element.innerText === "string"
       ? element.innerText
       : element.textContent || "";
-    return normalizeDisplayText(raw);
+    const normalized = normalizeDisplayText(raw);
+    cache?.set(element, normalized);
+    return normalized;
   }
 
   function normalizeDisplayText(value) {
@@ -148,17 +160,25 @@
 
   function isVisible(element) {
     if (!(element instanceof Element)) return false;
+    const cache = extractionCaches?.visible;
+    if (cache) {
+      const hit = cache.get(element);
+      if (hit !== undefined) return hit;
+    }
     // Do not depend on getClientRects(): it is zero in some otherwise valid
     // offscreen/test DOMs, while the question may still be the one the user
     // asked the extension to solve.  Ancestor styles reliably exclude truly
     // hidden template content.
+    let visible = true;
     for (let current = element; current instanceof Element; current = composedParent(current)) {
       const style = window.getComputedStyle(current);
       if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") {
-        return false;
+        visible = false;
+        break;
       }
     }
-    return true;
+    cache?.set(element, visible);
+    return visible;
   }
 
   function composedParent(element) {
@@ -380,14 +400,36 @@
     // shatter one question into singleton groups (all dropped by the >=2
     // filter). When the immediate choice container holds no same-kind peer,
     // re-anchor onto the smallest ancestor that does, so the options regroup.
+    // Containment is cached per (kind, container): on a 200-question page the
+    // shared ancestors are walked once instead of once per input.
+    const peersByKind = { radio: [], checkbox: [] };
+    for (const record of records) peersByKind[record.kind].push(record.input);
+    const containmentCache = new Map();
+    const peersWithin = (kind, container) => {
+      if (!(container instanceof Element)) return null;
+      const key = `${kind}::${nodeId(container)}`;
+      let peers = containmentCache.get(key);
+      if (!peers) {
+        peers = new Set(peersByKind[kind].filter((input) => composedContains(container, input)));
+        containmentCache.set(key, peers);
+      }
+      return peers;
+    };
+    const smallestAncestorWithPeers = (kind, element) => {
+      for (let current = composedParent(element), depth = 0;
+        current instanceof Element && depth < 7;
+        current = composedParent(current), depth += 1) {
+        const peers = peersWithin(kind, current);
+        if (peers && peers.size >= 2 && peers.size <= 12) return current;
+      }
+      return null;
+    };
     for (const record of records) {
-      const sameKindInputs = records
-        .filter((other) => other.kind === record.kind)
-        .map((other) => other.input);
-      const hasPeerInContainer = records.some((other) => other !== record
-        && other.kind === record.kind
-        && composedContains(record.choiceContainer, other.input));
-      const fallbackContainer = smallestContainerWithPeers(record.input, sameKindInputs);
+      const peersInContainer = peersWithin(record.kind, record.choiceContainer);
+      const hasPeerInContainer = Boolean(peersInContainer && peersInContainer.size >= 2);
+      const fallbackContainer = hasPeerInContainer
+        ? null
+        : smallestAncestorWithPeers(record.kind, record.input);
       record.container = record.root
         || (hasPeerInContainer ? record.choiceContainer : (fallbackContainer || record.choiceContainer))
         || record.form
@@ -726,10 +768,13 @@
     let best = null;
     const optionCount = options.length;
     for (const [depth, root] of rootCandidatesForGroup(group).entries()) {
+      const rootIsDocument = root === document.body || root === document.documentElement;
+      // Document-level roots only ever win when nothing tighter has a stem;
+      // probing them costs a full-subtree clone, so skip once a stem exists.
+      if (rootIsDocument && best?.stem) break;
       const stemResult = stemForQuestion(root, options, group.optionContainer);
       const stem = stemResult.text;
       const controlCount = root.querySelectorAll?.(CONTROL_SELECTOR).length || 0;
-      const rootIsDocument = root === document.body || root === document.documentElement;
       const explicit = root.matches?.(QUESTION_ROOT_SELECTOR) || false;
       const semantic = root.matches?.("fieldset, article, section, li, [role='group'], [role='radiogroup']")
         || /question|quiz|problem|topic|prompt|exercise|field/i.test(String(root.className || ""));
@@ -743,6 +788,10 @@
       if (!best || score > best.score) {
         best = { root, stem, stemSource: stemResult.source, score, controlCount, explicit, rootIsDocument };
       }
+      // A tight root with a stem and an explicit question-card match is the
+      // practical ceiling (stem 5 + explicit 5); larger candidates can only
+      // win by +2 (semantic) at a heavy clone cost. Keep the tight root.
+      if (best.score >= 10) break;
     }
     return best;
   }
@@ -825,6 +874,16 @@
 
   function extractAllQuestions() {
     const extracted = [];
+    extractionCaches = { text: new WeakMap(), visible: new WeakMap() };
+    try {
+      collectQuestions(extracted);
+    } finally {
+      extractionCaches = null;
+    }
+    return finalizeQuestions(extracted);
+  }
+
+  function collectQuestions(extracted) {
     const groups = [
       ...discoverNativeGroups(),
       ...discoverAriaGroups(),
@@ -836,7 +895,9 @@
       if (extracted.some((existing) => sameChoiceSet(existing, question))) return;
       extracted.push(question);
     });
+  }
 
+  function finalizeQuestions(extracted) {
     extracted.sort((left, right) => {
       if (left._root === right._root) return 0;
       const position = left._root?.compareDocumentPosition?.(right._root) || 0;
