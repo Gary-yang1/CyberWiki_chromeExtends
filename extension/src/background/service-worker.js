@@ -258,11 +258,21 @@ async function overlayReadiness() {
 /**
  * Badge flash for shortcut feedback. The service worker may suspend before a
  * cleanup timer fires, so the next run clears it instead of a timer.
+ *   ok    → green checkmark, collection reached the server
+ *   empty → yellow question mark, the page yielded no recognizable questions
+ *   error → red exclamation, network / permission / server failure
  */
-async function flashCollectorBadge(ok) {
+const COLLECTOR_BADGE_STYLES = {
+  ok: { color: "#177653", text: "✓" },
+  empty: { color: "#d97706", text: "?" },
+  error: { color: "#b33f36", text: "!" },
+};
+
+async function flashCollectorBadge(kind = "error") {
+  const style = COLLECTOR_BADGE_STYLES[kind] || COLLECTOR_BADGE_STYLES.error;
   try {
-    await chrome.action.setBadgeBackgroundColor({ color: ok ? "#177653" : "#b33f36" });
-    await chrome.action.setBadgeText({ text: ok ? "✓" : "!" });
+    await chrome.action.setBadgeBackgroundColor({ color: style.color });
+    await chrome.action.setBadgeText({ text: style.text });
   } catch {
     // The action API is unavailable in some test contexts; feedback is lost.
   }
@@ -289,14 +299,16 @@ async function collectCurrentPage(sender, payload = {}) {
       title: extraction.title,
       questions: extraction.questions,
     });
-    await flashCollectorBadge(true);
+    await flashCollectorBadge("ok");
     return {
       collected: true,
       id: confirmation.extraction.id,
       count: confirmation.extraction.questionCount,
     };
   } catch (error) {
-    await flashCollectorBadge(false);
+    // "Nothing recognizable on this page" is a normal outcome on non-quiz
+    // pages, not a system failure — give it its own amber marker.
+    await flashCollectorBadge(error?.code === "QUESTION_NOT_FOUND" ? "empty" : "error");
     throw appError(
       error?.message || "采集失败。",
       error?.code || "COLLECT_FAILED",
