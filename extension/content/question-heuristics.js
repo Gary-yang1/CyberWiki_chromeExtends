@@ -56,6 +56,21 @@
     return parseOptionText(value)?.key || "";
   }
 
+  /**
+   * Native inputs often carry their full label in the value attribute —
+   * Element Plus radios set value="使用专线传输". Treat the value as an
+   * option key only when it is key-shaped: a single letter/digit or a
+   * boolean word. Everything else falls back to positional A/B/C keys.
+   */
+  function optionKeyLikeValue(value) {
+    const compact = canonicalText(value);
+    if (!compact) return "";
+    if (BOOLEAN_TRUE.has(compact) || BOOLEAN_FALSE.has(compact)) return compact;
+    if (/^[a-h]$/i.test(compact)) return compact.toUpperCase();
+    if (/^[1-9]$/.test(compact)) return compact;
+    return "";
+  }
+
   function stripOptionPrefix(value, expectedKey = "") {
     const parsed = parseOptionText(value);
     if (!parsed) return normalizeDisplayText(value);
@@ -186,6 +201,7 @@
       keySequenceKind,
       normalizeDisplayText,
       optionKeyFromText,
+      optionKeyLikeValue,
       parseOptionText,
       scoreQuestionCandidate,
       splitSequentialRuns,

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>Element Plus 考试页（每选项独立 radiogroup）</title>
+    <!--
+      手工验证页：模拟 Vue + Element Plus 结构。
+      关键特征：
+      1. 每个选项各自包在一个 div.el-radio-group[role=radiogroup] 里
+      2. 每个 input 的 name 唯一（el-id-xxx 自动生成）
+      3. input.value 是完整选项文本，而非 A/B/C
+      4. 题干在 .subject-name，分值标记 [1分] 在题干尾部
+      验证：提取应识别出 2 道题（单选 + 多选），选项键为 A/B/C/D。
+    -->
+  </head>
+  <body>
+    <div data-v-c1b56fa4 class="subject-type">
+      <div data-v-c1b56fa4 class="subjectTop"><span data-v-c1b56fa4>单选题</span><span data-v-c1b56fa4 class="sub-line"></span></div>
+
+      <div data-v-c1b56fa4 class="subject-item">
+        <div data-v-c1b56fa4 class="subject-order"><div data-v-c1b56fa4 class="order-cicle"></div><div data-v-c1b56fa4 class="order-num">1</div></div>
+        <div data-v-c1b56fa4 class="subject-detail">
+          <div data-v-c1b56fa4 class="subject-name"><span data-v-c1b56fa4>为了防御网络监听，最有效也最常用的方法是（  ）。</span><span data-v-c1b56fa4 style="padding-left: 20px;">[1分]</span></div>
+          <div data-v-c1b56fa4>
+            <div data-v-c1b56fa4 class="el-radio-group" role="radiogroup"><label data-v-c1b56fa4 class="el-radio"><span class="el-radio__input"><input class="el-radio__original" name="el-id-1-63" type="radio" value="使用专线传输" tabindex="0"><span class="el-radio__inner"></span></span><span class="el-radio__label">使用专线传输</span></label></div>
+            <div data-v-c1b56fa4 class="el-radio-group" role="radiogroup"><label data-v-c1b56fa4 class="el-radio"><span class="el-radio__input"><input class="el-radio__original" name="el-id-1-64" type="radio" value="对传输数据进行加密" tabindex="0"><span class="el-radio__inner"></span></span><span class="el-radio__label">对传输数据进行加密</span></label></div>
+            <div data-v-c1b56fa4 class="el-radio-group" role="radiogroup"><label data-v-c1b56fa4 class="el-radio"><span class="el-radio__input"><input class="el-radio__original" name="el-id-1-65" type="radio" value="采用物理传输（非网络）" tabindex="0"><span class="el-radio__inner"></span></span><span class="el-radio__label">采用物理传输（非网络）</span></label></div>
+            <div data-v-c1b56fa4 class="el-radio-group" role="radiogroup"><label data-v-c1b56fa4 class="el-radio"><span class="el-radio__input"><input class="el-radio__original" name="el-id-1-66" type="radio" value="使用光纤传输数据" tabindex="0"><span class="el-radio__inner"></span></span><span class="el-radio__label">使用光纤传输数据</span></label></div>
+          </div>
+        </div>
+      </div>
+
+      <div data-v-c1b56fa4 class="subject-item">
+        <div data-v-c1b56fa4 class="subject-order"><div data-v-c1b56fa4 class="order-cicle"></div><div data-v-c1b56fa4 class="order-num">2</div></div>
+        <div data-v-c1b56fa4 class="subject-detail">
+          <div data-v-c1b56fa4 class="subject-name"><span data-v-c1b56fa4>网络安全三要素是（  ）。</span><span data-v-c1b56fa4 style="padding-left: 20px;">[1分]</span></div>
+          <div data-v-c1b56fa4>
+            <div data-v-c1b56fa4 class="el-radio-group" role="radiogroup"><label data-v-c1b56fa4 class="el-radio"><span class="el-radio__input"><input class="el-radio__original" name="el-id-2-67" type="radio" value="完整性、保密性、可审查性" tabindex="0"><span class="el-radio__inner"></span></span><span class="el-radio__label">完整性、保密性、可审查性</span></label></div>
+            <div data-v-c1b56fa4 class="el-radio-group" role="radiogroup"><label data-v-c1b56fa4 class="el-radio"><span class="el-radio__input"><input class="el-radio__original" name="el-id-2-68" type="radio" value="保密性、可控性、可修改性" tabindex="0"><span class="el-radio__inner"></span></span><span class="el-radio__label">保密性、可控性、可修改性</span></label></div>
+            <div data-v-c1b56fa4 class="el-radio-group" role="radiogroup"><label data-v-c1b56fa4 class="el-radio"><span class="el-radio__input"><input class="el-radio__original" name="el-id-2-69" type="radio" value="可审查性、可修改性、完整性" tabindex="0"><span class="el-radio__inner"></span></span><span class="el-radio__label">可审查性、可修改性、完整性</span></label></div>
+            <div data-v-c1b56fa4 class="el-radio-group" role="radiogroup"><label data-v-c1b56fa4 class="el-radio"><span class="el-radio__input"><input class="el-radio__original" name="el-id-2-70" type="radio" value="完整性、机密性、可用性" tabindex="0"><span class="el-radio__inner"></span></span><span class="el-radio__label">完整性、机密性、可用性</span></label></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

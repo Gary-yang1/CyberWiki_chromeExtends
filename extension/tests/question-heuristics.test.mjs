@@ -60,3 +60,17 @@ test("requires multiple independent signals before accepting text-only candidate
   });
   assert.equal(rejected.accepted, false);
 });
+
+test("treats value attributes as option keys only when key-shaped", () => {
+  // Element Plus sets value to the full label; that must NOT become the key.
+  assert.equal(heuristics.optionKeyLikeValue("使用专线传输"), "");
+  assert.equal(heuristics.optionKeyLikeValue("对传输数据进行加密"), "");
+  assert.equal(heuristics.optionKeyLikeValue(""), "");
+  // Classic shapes stay usable as keys.
+  assert.equal(heuristics.optionKeyLikeValue("A"), "A");
+  assert.equal(heuristics.optionKeyLikeValue("b"), "B");
+  assert.equal(heuristics.optionKeyLikeValue("3"), "3");
+  assert.equal(heuristics.optionKeyLikeValue("(B)"), "B");
+  assert.equal(heuristics.optionKeyLikeValue(" true "), "true");
+  assert.equal(heuristics.optionKeyLikeValue("正确"), "正确");
+});
