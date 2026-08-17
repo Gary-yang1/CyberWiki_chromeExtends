@@ -234,13 +234,17 @@ test("normalizes and persists low-interference overlay preferences", async () =>
     enabled: true,
     stealth: false,
     stealthOpacity: 0.08,
-    opacity: 0.3,
+    opacity: 0.1,
     clickThrough: true,
     collapsed: false,
     position: { right: 8, bottom: 42 },
   });
   const raw = await getSettings();
   assert.deepEqual(raw.overlay, saved.overlay);
+
+  // The floor is 1%: below-minimum values clamp instead of vanishing.
+  const floored = await saveSettings({ overlay: { opacity: 0.001 } });
+  assert.equal(floored.overlay.opacity, 0.01);
 
   resetSettings();
   assert.deepEqual((await getSettings()).overlay, DEFAULT_OVERLAY_SETTINGS);

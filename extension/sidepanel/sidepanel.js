@@ -268,7 +268,7 @@ function normalizedOverlaySettings() {
     enabled: overlay.enabled === true,
     stealth: overlay.stealth === true,
     stealthOpacity: Math.min(Math.max(Number(overlay.stealthOpacity) || 0.08, 0.01), 0.3),
-    opacity: Math.min(Math.max(Number(overlay.opacity) || 0.68, 0.3), 1),
+    opacity: Math.min(Math.max(Number(overlay.opacity) || 0.68, 0.01), 1),
     clickThrough: overlay.clickThrough === true,
     collapsed: overlay.collapsed !== false,
     position: {
@@ -314,7 +314,7 @@ function overlaySettingsFromForm() {
     enabled: $("#overlayEnabled").checked,
     stealth: $("#overlayStealth").checked,
     stealthOpacity: Math.min(Math.max(Number($("#overlayStealthOpacity").value) / 100, 0.01), 0.3),
-    opacity: Math.min(Math.max(Number($("#overlayOpacity").value) / 100, 0.3), 1),
+    opacity: Math.min(Math.max(Number($("#overlayOpacity").value) / 100, 0.01), 1),
     clickThrough: $("#overlayClickThrough").checked,
   };
 }

@@ -91,7 +91,7 @@ export function normalizeOverlaySettings(value = {}) {
     enabled: source.enabled === true,
     stealth: source.stealth === true,
     stealthOpacity: clampNumber(source.stealthOpacity, DEFAULT_OVERLAY_SETTINGS.stealthOpacity, 0.01, 0.3),
-    opacity: clampNumber(source.opacity, DEFAULT_OVERLAY_SETTINGS.opacity, 0.3, 1),
+    opacity: clampNumber(source.opacity, DEFAULT_OVERLAY_SETTINGS.opacity, 0.01, 1),
     clickThrough: source.clickThrough === true,
     collapsed: source.collapsed !== false,
     position: {
