@@ -18,8 +18,8 @@
   "commands": {
     "collect-current-page": {
       "suggested_key": {
-        "default": "Alt+Shift+E",
-        "mac": "Alt+Shift+E"
+        "default": "Alt+Shift+C",
+        "mac": "Alt+Shift+C"
       },
       "description": "一键提取当前页题目并发往题库服务"
     }

@@ -93,7 +93,7 @@
     if (!state.items.length) {
       const note = document.createElement("p");
       note.className = "empty-note";
-      note.innerHTML = "<strong>还没有采集记录</strong>在插件里开启「题库采集」，到题目页面按 Alt / ⌥ + Shift + E 即可一键入库。";
+      note.innerHTML = "<strong>还没有采集记录</strong>在插件里开启「题库采集」，到题目页面按 Alt / ⌥ + Shift + C 即可一键入库。";
       list.append(note);
     } else {
       state.items.forEach((item) => {
