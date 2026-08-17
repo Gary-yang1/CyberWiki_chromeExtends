@@ -15,16 +15,15 @@
     "default_path": "sidepanel/sidepanel.html"
   },
   "options_page": "options/options.html",
-  "content_scripts": [
-    {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": [
-        "content/question-heuristics.js",
-        "content/content-script.js"
-      ],
-      "run_at": "document_idle"
+  "commands": {
+    "collect-current-page": {
+      "suggested_key": {
+        "default": "Alt+Shift+E",
+        "mac": "Alt+Shift+E"
+      },
+      "description": "一键提取当前页题目并发往题库服务"
     }
-  ],
+  },
   "permissions": [
     "activeTab",
     "tabs",

@@ -931,6 +931,14 @@ chrome.runtime.onInstalled.addListener(() => {
   syncOverlayAcrossTabs().catch(() => undefined);
 });
 
+// Browser-level keyboard command (rebindable at chrome://extensions/shortcuts).
+// No sender here: getActiveTab falls back to the active tab of the focused
+// window, and extractCurrentQuestion injects the content script on demand.
+chrome.commands.onCommand.addListener((command) => {
+  if (command !== "collect-current-page") return;
+  collectCurrentPage().catch(() => undefined);
+});
+
 chrome.runtime.onStartup?.addListener(() => {
   syncOverlayAcrossTabs().catch(() => undefined);
 });
